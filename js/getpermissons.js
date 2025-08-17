@@ -47,47 +47,48 @@ var per = {
         switch (e.type) {
             case "click":
                 if (e.target.id == "getpers") {
-                    if (per.pers && per.orgs) {
-                        chrome.permissions.request({permissions: per.pers, origins: per.orgs}, function (granted) {
-                            checkRequest(granted);
-                        });
-                    } else if (per.pers) {
-                        chrome.permissions.request({permissions: per.pers}, function (granted) {
-                            checkRequest(granted);
-                        });
-                    } else if (per.orgs) {
-                        chrome.permissions.request({origins: per.orgs}, function (granted) {
-                            checkRequest(granted);
-                        });
-                    }
-
-                    var checkRequest = function (granted) {
+                    // 提前声明，避免异步闭包踩未赋值变量
+                    const checkRequest = (granted) => {
                         if (granted) {
-                            chrome.runtime.sendMessage({type: "per_clear", pers: per.pers}, function (response) {});
-                            var count = 5;
-                            document.querySelector("#perlistbox").style.cssText +=
-                                "font-size:18px;color:red;text-align:center;";
-                            document.querySelector("#perbtnbox").remove();
-                            cut();
-                            window.setInterval(cut, 1000);
-                            function cut() {
+                            // fire-and-forget：不带回调，避免“port closed”
+                            chrome.runtime.sendMessage({type: "per_clear", pers: per.pers});
+
+                            let count = 5;
+                            const perlistbox = document.querySelector("#perlistbox");
+                            const perbtnbox = document.querySelector("#perbtnbox");
+                            if (perlistbox) perlistbox.style.cssText += "font-size:18px;color:red;text-align:center;";
+                            if (perbtnbox) perbtnbox.remove();
+
+                            const tick = () => {
                                 if (count) {
-                                    document.querySelector("#perlistbox").textContent =
-                                        per.getI18n("getper_after") + " " + count + " s.";
+                                    if (perlistbox)
+                                        perlistbox.textContent = per.getI18n("getper_after") + " " + count + " s.";
                                     count -= 1;
+                                    window.setTimeout(tick, 1000);
                                 } else {
                                     window.close();
                                 }
-                            }
+                            };
+                            tick();
                         } else {
                             alert(per.getI18n("getper_fail"));
                             window.close();
                         }
                     };
+
+                    // 统一用同一个回调
+                    if (per.pers && per.orgs) {
+                        chrome.permissions.request({permissions: per.pers, origins: per.orgs}, checkRequest);
+                    } else if (per.pers) {
+                        chrome.permissions.request({permissions: per.pers}, checkRequest);
+                    } else if (per.orgs) {
+                        chrome.permissions.request({origins: per.orgs}, checkRequest);
+                    }
                 }
                 break;
+
             case "unload":
-                chrome.runtime.sendMessage({type: "per_clear", pers: per.pers}, function (response) {});
+                chrome.runtime.sendMessage({type: "per_clear", pers: per.pers});
                 break;
         }
     },
