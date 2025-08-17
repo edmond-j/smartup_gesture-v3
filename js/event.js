@@ -1177,28 +1177,45 @@ var sue = {
         sue.drawing = false;
     },
     sendDir: function (dir, dirType, e) {
-        var returnValue;
-        chrome.runtime.sendMessage(
-            extID,
-            {type: dirType, direct: dir, drawType: sue.drawType, selEle: sue.selEle},
-            function (response) {
-                returnValue = response;
-                sue.getedConf = returnValue;
-                if (!response) {
-                    return false;
+        // 1) 在页面 world 或扩展已重载时，这里会返回 false
+        const canMsg =
+            typeof chrome !== "undefined" &&
+            chrome.runtime &&
+            chrome.runtime.id &&
+            typeof chrome.runtime.sendMessage === "function";
+
+        if (!canMsg) {
+            // 没有扩展运行时（例如被注入到了页面 world，或扩展刚刚重载）
+            return;
+        }
+
+        try {
+            chrome.runtime.sendMessage(
+                {type: dirType, direct: dir, drawType: sue.drawType, selEle: sue.selEle},
+                function (response) {
+                    if (chrome.runtime.lastError) {
+                        // 背景页暂时未就绪/端口被关，静默跳过即可
+                        return;
+                    }
+                    if (!response) return;
+
+                    switch (response.type) {
+                        case "tip":
+                            sue.ui_tip(response, e);
+                            sue.ui_note(response, e);
+                            sue.ui_allaction(response, e);
+                            sue.uiPos(e);
+                            break;
+                        case "action":
+                            break;
+                    }
                 }
-                switch (response.type) {
-                    case "tip":
-                        sue.ui_tip(response, e);
-                        sue.ui_note(response, e);
-                        sue.ui_allaction(response, e);
-                        sue.uiPos(e);
-                        break;
-                    case "action":
-                        break;
-                }
-            }
-        );
+            );
+        } catch (err) {
+            // 扩展上下文失效（Extension context invalidated）等：忽略即可
+            if (String(err).includes("Extension context invalidated")) return;
+            console.warn("sendMessage failed:", err);
+        }
     },
 };
 chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
@@ -1245,11 +1262,14 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
             break;
     }
 });
-chrome.runtime.sendMessage(extID, {type: "evt_getconf"}, function (response) {
-    if (response) {
+try {
+    chrome.runtime.sendMessage({type: "evt_getconf"}, function (response) {
+        if (chrome.runtime.lastError || !response) return;
         config = response.config;
         devMode = response.devMode;
         sue.cons.os = response.os;
         sue.init();
-    }
-});
+    });
+} catch (e) {
+    // 扩展刚重载且页面未刷新时可能触发；忽略即可，用户刷新后会恢复
+}

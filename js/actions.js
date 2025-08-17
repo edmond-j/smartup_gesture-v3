@@ -12,7 +12,7 @@ let actions = {
         /*"ag_copy",*/ "ag_txt",
         "ag_lnk",
         "ag_img",
-        /*"ag_apps",*/ "ag_chrome",
+        // /*"ag_apps",*/ "ag_chrome",
         "ag_su",
         "ag_apps",
         "ag_others",
@@ -104,10 +104,10 @@ let actions = {
             {name: "imgsearch", selects: ["n_imgengine", "n_encoding", "n_optype", "n_position"], checks: ["n_pin"]},
         ],
 
-        [
-            //group chrome
-            {name: "crpages", selects: ["n_crpages", "n_optype", "n_position"], checks: ["n_pin"]},
-        ],
+        // [
+        //     // group chrome
+        //     {name: "crpages", selects: ["n_crpages", "n_optype", "n_position"], checks: ["n_pin"]},
+        // ],
         [
             //group smartup
             {name: "closeapps"},
@@ -145,6 +145,7 @@ let actions = {
         ],
         [
             //group others
+            {name: "crpages", selects: ["n_crpages", "n_optype", "n_position"], checks: ["n_pin"]},
             {name: "dldir"},
             {name: "capture"},
             {name: "bookmark", selects: ["n_tab"], checks: ["n_notif", "n_closetab"]},
@@ -156,7 +157,6 @@ let actions = {
             {name: "print"},
             {name: "extdisable"},
             {name: "mute", selects: ["n_mute"]},
-            {name: "magnet"},
         ],
         [
             //ag_exp

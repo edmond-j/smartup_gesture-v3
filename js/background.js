@@ -1330,16 +1330,29 @@ var sub = {
         // }
     },
     insertTest: function (appname) {
-        //console.log("appname")
-        //chrome.tabs.sendMessage(curTab.id,{type:"apptype",apptype:appname},function(response){});
+        if (!sub.curTab || !sub.curTab.id) return;
         chrome.scripting.executeScript({
-            code:
-                'chrome.runtime.sendMessage({type:"apps_test",apptype:"' +
-                appname +
-                '",value:sue.apps.enable,appjs:appType["' +
-                appname +
-                '"]},function(response){console.log(response)})',
-            runAt: "document_start",
+            target: {tabId: sub.curTab.id, allFrames: true},
+            world: "ISOLATED", // 可选，默认就是 ISOLATED；保守起见写上
+            func: (name) => {
+                // 在内容脚本的隔离环境里执行；如果 event.js 里有全局 appType，这里是能访问到的
+                try {
+                    chrome.runtime.sendMessage(
+                        {
+                            type: "apps_test",
+                            apptype: name,
+                            value: sue?.apps?.enable,
+                            appjs: typeof appType !== "undefined" ? appType[name] : undefined,
+                        },
+                        (resp) => {
+                            /* 可以不处理 */
+                        }
+                    );
+                } catch (e) {
+                    // 忽略“扩展上下文失效”等开发期噪音
+                }
+            },
+            args: [appname], // 用 args 传参，别在字符串里拼
         });
     },
     checkPermission: function (thepers, theorgs, theFunction, msg) {
@@ -2818,18 +2831,27 @@ var sub = {
             var theFunction = function () {
                 var _appname = "homepage";
                 sub.initAppconf(_appname);
+
                 chrome.topSites.get(function (sites) {
-                    let _obj = {};
-                    _obj.sites = sites;
-                    _obj.listId = localStorage.getItem("homepageListId");
-                    sub.cons[_appname] = _obj;
-                    sub.insertTest(_appname);
+                    // 用 storage.local 读取（需要 manifest 里有 "storage" 权限）
+                    chrome.storage.local.get({homepageListId: null}, function (items) {
+                        if (chrome.runtime.lastError) {
+                            console.debug("storage.get failed:", chrome.runtime.lastError.message);
+                        }
+                        let _obj = {};
+                        _obj.sites = sites;
+                        _obj.listId = items.homepageListId; // 不存在则为 null
+                        sub.cons[_appname] = _obj;
+                        sub.insertTest(_appname);
+                    });
                 });
             };
+
             var thepers = ["topSites"];
             var theorgs;
             sub.checkPermission(thepers, theorgs, theFunction);
         },
+
         autoreload: function () {
             var _appname = "autoreload";
             sub.insertTest(_appname);
@@ -2842,11 +2864,11 @@ var sub = {
             var _appname = "pxmovie";
             sub.insertTest(_appname);
         },
-        lottery: function () {
-            var _appname = "lottery";
-            sub.initAppconf(_appname);
-            sub.insertTest(_appname);
-        },
+        // lottery: function () {
+        //     var _appname = "lottery";
+        //     sub.initAppconf(_appname);
+        //     sub.insertTest(_appname);
+        // },
         speaker: function () {
             var theFunction = function () {
                 var _appname = "speaker";
@@ -2979,7 +3001,7 @@ var sub = {
                 "numc",
                 "speaker",
                 "jslist",
-                "lottery",
+                // "lottery",
                 "convertcase",
                 "autoreload",
                 "homepage",
@@ -4347,7 +4369,7 @@ var sub = {
                     message.value.theFunction,
                     message.value.msg
                 );
-                sendResponse({ ok: true });
+                sendResponse({ok: true});
                 break;
             case "per_getconf":
                 sendResponse(sub.cons.permissions);
@@ -5024,129 +5046,129 @@ var sub = {
             },
         },
         //gemini更新至此
-        lottery: {
-            getData: function (message, sender, sendResponse) {
-                let urlOBJ = {
-                    lottery_dlt:
-                        "http://www.lottery.gov.cn/api/lottery_kj_detail.jspx?_ltype=4&_term=" + message.value.term,
-                    lottery_pls:
-                        "http://www.lottery.gov.cn/api/lottery_kj_detail.jspx?_ltype=5&_term=" + message.value.term,
-                    lottery_ssq: "http://east.swlc.net.cn/LotteryNew/AnnouncementDetail.aspx",
-                    lottery_sd: "http://east.swlc.net.cn/LotteryNew/AnnouncementDetail.aspx",
-                };
-                const fetchAndSend = async (url, options, type) => {
-                    try {
-                        const response = await fetch(url, options);
-                        const text = await response.text();
-                        const sanitizedText = DOMPurify.sanitize(text);
-                        const htmlData = new DOMParser().parseFromString(sanitizedText, "text/html");
-                        let data = [];
-                        let elements;
+        // lottery: {
+        //     getData: function (message, sender, sendResponse) {
+        //         let urlOBJ = {
+        //             lottery_dlt:
+        //                 "http://www.lottery.gov.cn/api/lottery_kj_detail.jspx?_ltype=4&_term=" + message.value.term,
+        //             lottery_pls:
+        //                 "http://www.lottery.gov.cn/api/lottery_kj_detail.jspx?_ltype=5&_term=" + message.value.term,
+        //             lottery_ssq: "http://east.swlc.net.cn/LotteryNew/AnnouncementDetail.aspx",
+        //             lottery_sd: "http://east.swlc.net.cn/LotteryNew/AnnouncementDetail.aspx",
+        //         };
+        //         const fetchAndSend = async (url, options, type) => {
+        //             try {
+        //                 const response = await fetch(url, options);
+        //                 const text = await response.text();
+        //                 const sanitizedText = DOMPurify.sanitize(text);
+        //                 const htmlData = new DOMParser().parseFromString(sanitizedText, "text/html");
+        //                 let data = [];
+        //                 let elements;
 
-                        switch (type) {
-                            case "lottery_ssq":
-                                elements = htmlData.querySelectorAll("td");
-                                for (let i = 5; i < 12; i++) {
-                                    const element = elements[i].querySelector("font");
-                                    if (element) {
-                                        data.push(element.textContent);
-                                    }
-                                }
-                                break;
-                            case "lottery_sd":
-                                elements = htmlData.querySelectorAll("td");
-                                for (let i = 5; i < 8; i++) {
-                                    const element = elements[i].querySelector("font");
-                                    if (element) {
-                                        data.push(element.textContent);
-                                    }
-                                }
-                                break;
-                            default:
-                                const jsonData = JSON.parse(sanitizedText);
-                                data = jsonData[0].codeNumber;
-                                break;
-                        }
-                        chrome.tabs.sendMessage(sender.tab.id, {
-                            type: "data",
-                            value: data,
-                            lotteryType: message.value.type,
-                        });
-                    } catch (err) {
-                        console.error("Error fetching lottery data:", err);
-                    }
-                };
+        //                 switch (type) {
+        //                     case "lottery_ssq":
+        //                         elements = htmlData.querySelectorAll("td");
+        //                         for (let i = 5; i < 12; i++) {
+        //                             const element = elements[i].querySelector("font");
+        //                             if (element) {
+        //                                 data.push(element.textContent);
+        //                             }
+        //                         }
+        //                         break;
+        //                     case "lottery_sd":
+        //                         elements = htmlData.querySelectorAll("td");
+        //                         for (let i = 5; i < 8; i++) {
+        //                             const element = elements[i].querySelector("font");
+        //                             if (element) {
+        //                                 data.push(element.textContent);
+        //                             }
+        //                         }
+        //                         break;
+        //                     default:
+        //                         const jsonData = JSON.parse(sanitizedText);
+        //                         data = jsonData[0].codeNumber;
+        //                         break;
+        //                 }
+        //                 chrome.tabs.sendMessage(sender.tab.id, {
+        //                     type: "data",
+        //                     value: data,
+        //                     lotteryType: message.value.type,
+        //                 });
+        //             } catch (err) {
+        //                 console.error("Error fetching lottery data:", err);
+        //             }
+        //         };
 
-                switch (message.value.type) {
-                    case "lottery_dlt":
-                    case "lottery_pls":
-                        fetchAndSend(urlOBJ[message.value.type]);
-                        break;
-                    case "lottery_ssq":
-                    case "lottery_sd":
-                        const formData = new FormData();
-                        formData.append("lottery_type", message.value.type === "lottery_ssq" ? "tb" : "3d");
-                        formData.append("r", 1522867870); // This value might need to be dynamic or updated if the source changes.
-                        formData.append("no", message.value.term);
-                        const options = {
-                            method: "POST",
-                            body: formData,
-                        };
-                        fetchAndSend(urlOBJ[message.value.type], options, message.value.type);
-                        break;
-                }
-            },
-            getTerm: function (message, sender, sendResponse) {
-                let urlOBJ = {
-                    lottery_dlt: "http://www.lottery.gov.cn/api/get_typeBytermList.jspx?_ltype=4",
-                    lottery_pls: "http://www.lottery.gov.cn/api/get_typeBytermList.jspx?_ltype=5",
-                    lottery_ssq: "http://east.swlc.net.cn/LotteryNew/AnnouncementDetail.aspx",
-                    lottery_sd: "http://east.swlc.net.cn/LotteryNew/AnnouncementDetail.aspx",
-                };
+        //         switch (message.value.type) {
+        //             case "lottery_dlt":
+        //             case "lottery_pls":
+        //                 fetchAndSend(urlOBJ[message.value.type]);
+        //                 break;
+        //             case "lottery_ssq":
+        //             case "lottery_sd":
+        //                 const formData = new FormData();
+        //                 formData.append("lottery_type", message.value.type === "lottery_ssq" ? "tb" : "3d");
+        //                 formData.append("r", 1522867870); // This value might need to be dynamic or updated if the source changes.
+        //                 formData.append("no", message.value.term);
+        //                 const options = {
+        //                     method: "POST",
+        //                     body: formData,
+        //                 };
+        //                 fetchAndSend(urlOBJ[message.value.type], options, message.value.type);
+        //                 break;
+        //         }
+        //     },
+        //     getTerm: function (message, sender, sendResponse) {
+        //         let urlOBJ = {
+        //             lottery_dlt: "http://www.lottery.gov.cn/api/get_typeBytermList.jspx?_ltype=4",
+        //             lottery_pls: "http://www.lottery.gov.cn/api/get_typeBytermList.jspx?_ltype=5",
+        //             lottery_ssq: "http://east.swlc.net.cn/LotteryNew/AnnouncementDetail.aspx",
+        //             lottery_sd: "http://east.swlc.net.cn/LotteryNew/AnnouncementDetail.aspx",
+        //         };
 
-                const fetchAndSendTerm = async (url, options, type) => {
-                    try {
-                        const response = await fetch(url, options);
-                        const text = await response.text();
-                        const sanitizedText = DOMPurify.sanitize(text);
-                        let data = [];
+        //         const fetchAndSendTerm = async (url, options, type) => {
+        //             try {
+        //                 const response = await fetch(url, options);
+        //                 const text = await response.text();
+        //                 const sanitizedText = DOMPurify.sanitize(text);
+        //                 let data = [];
 
-                        if (type === "lottery_dlt" || type === "lottery_pls") {
-                            const jsonData = JSON.parse(sanitizedText);
-                            data = jsonData[0].tremList;
-                        } else {
-                            const htmlData = new DOMParser().parseFromString(sanitizedText, "text/html");
-                            const elements = htmlData.querySelectorAll("#no option");
-                            for (const element of elements) {
-                                data.push(element.value);
-                            }
-                        }
-                        chrome.tabs.sendMessage(sender.tab.id, {type: "term", value: data});
-                    } catch (err) {
-                        console.error("Error fetching lottery terms:", err);
-                    }
-                };
+        //                 if (type === "lottery_dlt" || type === "lottery_pls") {
+        //                     const jsonData = JSON.parse(sanitizedText);
+        //                     data = jsonData[0].tremList;
+        //                 } else {
+        //                     const htmlData = new DOMParser().parseFromString(sanitizedText, "text/html");
+        //                     const elements = htmlData.querySelectorAll("#no option");
+        //                     for (const element of elements) {
+        //                         data.push(element.value);
+        //                     }
+        //                 }
+        //                 chrome.tabs.sendMessage(sender.tab.id, {type: "term", value: data});
+        //             } catch (err) {
+        //                 console.error("Error fetching lottery terms:", err);
+        //             }
+        //         };
 
-                switch (message.value.type) {
-                    case "lottery_dlt":
-                    case "lottery_pls":
-                        fetchAndSendTerm(urlOBJ[message.value.type]);
-                        break;
-                    case "lottery_ssq":
-                    case "lottery_sd":
-                        const formData = new FormData();
-                        formData.append("lottery_type", message.value.type === "lottery_ssq" ? "tb" : "3d");
-                        formData.append("r", 1522867870); // This might be an outdated timestamp
-                        formData.append("no", message.value.type === "lottery_ssq" ? "2019062" : "2019217"); // These are likely outdated numbers
-                        const options = {
-                            method: "POST",
-                            body: formData,
-                        };
-                        fetchAndSendTerm(urlOBJ[message.value.type], options, message.value.type);
-                        break;
-                }
-            },
-        },
+        //         switch (message.value.type) {
+        //             case "lottery_dlt":
+        //             case "lottery_pls":
+        //                 fetchAndSendTerm(urlOBJ[message.value.type]);
+        //                 break;
+        //             case "lottery_ssq":
+        //             case "lottery_sd":
+        //                 const formData = new FormData();
+        //                 formData.append("lottery_type", message.value.type === "lottery_ssq" ? "tb" : "3d");
+        //                 formData.append("r", 1522867870); // This might be an outdated timestamp
+        //                 formData.append("no", message.value.type === "lottery_ssq" ? "2019062" : "2019217"); // These are likely outdated numbers
+        //                 const options = {
+        //                     method: "POST",
+        //                     body: formData,
+        //                 };
+        //                 fetchAndSendTerm(urlOBJ[message.value.type], options, message.value.type);
+        //                 break;
+        //         }
+        //     },
+        // },
         pxmovie: {
             getList: function (message, sender, sendResponse) {
                 fetch("https://www.poxiao.com/")

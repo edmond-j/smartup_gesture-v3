@@ -6,7 +6,7 @@
 	"version": "7.1.1225.1162",
 	"description": "__MSG_ext_des__",
 	"default_locale": "en",
-	"author": "zimo",
+	"author": "zimo, edmond-j",
 	"icons": {
 		"16": "icon.png",
 		"48": "icon.png",
