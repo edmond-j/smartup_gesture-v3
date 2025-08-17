@@ -4347,6 +4347,7 @@ var sub = {
                     message.value.theFunction,
                     message.value.msg
                 );
+                sendResponse({ ok: true });
                 break;
             case "per_getconf":
                 sendResponse(sub.cons.permissions);
@@ -5557,20 +5558,20 @@ if (chrome.runtime.onInstalled) {
     chrome.runtime.onInstalled.addListener(function (details) {
         console.log(details.reason);
         // Correcting the script injection to use a valid tabId
-        chrome.windows.getAll({populate: true}, function (windows) {
-            for (const window of windows) {
-                for (const tab of window.tabs) {
-                    if (tab.url && (tab.url.startsWith("http://") || tab.url.startsWith("https://"))) {
-                        chrome.scripting
-                            .executeScript({
-                                target: {tabId: tab.id, allFrames: true},
-                                files: ["js/event.js"],
-                            })
-                            .catch((err) => console.error("Script injection failed:", err));
-                    }
-                }
-            }
-        });
+        // chrome.windows.getAll({populate: true}, function (windows) {
+        //     for (const window of windows) {
+        //         for (const tab of window.tabs) {
+        //             if (tab.url && (tab.url.startsWith("http://") || tab.url.startsWith("https://"))) {
+        //                 chrome.scripting
+        //                     .executeScript({
+        //                         target: {tabId: tab.id, allFrames: true},
+        //                         files: ["js/event.js"],
+        //                     })
+        //                     .catch((err) => console.error("Script injection failed:", err));
+        //             }
+        //         }
+        //     }
+        // });
         if (details.reason == "install") {
             chrome.tabs.create({url: "../html/options.html"});
         }
@@ -5637,7 +5638,7 @@ chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
         chrome.tabs.sendMessage(tabId, {type: "status"}, function (response) {
             if (chrome.runtime.lastError) {
                 // Handle potential disconnection gracefully
-                console.warn("Could not establish connection. Receiving end does not exist.");
+                // console.warn("Could not establish connection. Receiving end does not exist.");
                 sub.setIcon("warning", tabId, changeInfo, tab);
                 return;
             }
