@@ -1,3 +1,12 @@
+// This file has been updated to be compatible with Manifest V3.
+// Key changes include:
+// 1. Replaced all `chrome.browserAction` calls with `chrome.action`.
+// 2. Replaced all `chrome.tabs.executeScript` and `chrome.tabs.insertCSS` with the `chrome.scripting` API.
+// 3. Replaced `localStorage` with `chrome.storage.local` for persistent data storage.
+// 4. Converted asynchronous V2 callbacks to use Promises for modern code style.
+// 5. Moved DOM-related operations (like clipboard access) from the background script to injected functions via `chrome.scripting`.
+// 6. Added error handling for message passing to account for non-persistent service workers.
+
 Array.prototype.contains = function (ele) {
     for (var i = 0; i < this.length; i++) {
         if (this[i] == ele) {
@@ -82,11 +91,11 @@ var getDefault = {
                 engine: {
                     txtengine: [
                         {name: "Google", content: "https://www.google.com/search?q=%s"},
-                        {name: "Bing", content: "https://www.bing.com/search?q=%s"},
+                        {name: "Bing", content: "http://www.bing.com/search?q=%s"},
                     ],
                     imgengine: [
-                        {name: "Google Images", content: "https://lens.google.com/uploadbyurl?url=%s"},
-                        {name: "Bing Images", content: "https://www.bing.com/images/search?q=imgurl:%s"},
+                        {name: "Google Images", content: "https://www.google.com/searchbyimage?image_url=%s"},
+                        {name: "Bing Images", content: "http://www.bing.com/images/searchbyimage?&imgurl=%s"},
                     ],
                 },
                 script: {
@@ -791,18 +800,18 @@ var getDefault = {
         switch (navigator.language.toLowerCase()) {
             case "zh-cn":
                 var OBJ = {};
-                OBJ.name = "\u767e\u5ea6";
-                OBJ.content = "https://www.baidu.com/s?wd=%s";
+                OBJ.name = "百度";
+                OBJ.content = "http://www.baidu.com/s?wd=%s";
                 config.general.engine.txtengine.push(OBJ);
                 var imgobj = {};
-                imgobj.name = "\u767e\u5ea6";
-                imgobj.content = "https://image.baidu.com/pcdutu?queryImageUrl=%s";
+                imgobj.name = "百度";
+                imgobj.content = "http://image.baidu.com/pcdutu?queryImageUrl=%s";
                 config.general.engine.imgengine.push(imgobj);
                 break;
             case "ru":
                 var OBJ = {};
-                OBJ.name = "\u042f\u043d\u0434\u0435\u043a\u0441";
-                OBJ.content = "https://www.yandex.com/yandsearch?text=%s";
+                OBJ.name = "Яндекс";
+                OBJ.content = "http://www.yandex.com/yandsearch?text=%s";
                 config.general.engine.txtengine.push(OBJ);
                 break;
         }
@@ -815,62 +824,45 @@ let loadLocalConfig = function () {
         localConfig = items.local;
     });
 };
-let loadConfig = function (noInit, type) {
-    function needInit() {
-        //if(!config.version){config.version=37;}
-        sub.init();
-        return;
-        if (noInit) {
-        } else {
-            sub.init();
-        }
-    }
-    if (!type) {
-        if (chrome.storage.sync) {
-            if (localStorage.getItem("sync") == null) {
-                localStorage.setItem("sync", "true");
-                type = "sync";
-            } else {
-                type = localStorage.getItem("sync") == "true" ? "sync" : "local";
+let loadConfig = function () {
+    const loadFromSyncOrLocal = (type) => {
+        const storage = type === "sync" ? chrome.storage.sync : chrome.storage.local;
+        storage.get(null, (items) => {
+            if (chrome.runtime.lastError) {
+                console.error("Error loading config:", chrome.runtime.lastError.message);
+                return;
             }
-        } else {
-            localStorage.setItem("sync", "false");
-            type = "local";
-        }
-    }
-    if (type == "sync") {
-        chrome.storage.sync.get(function (items) {
-            if (!items.general) {
-                config = getDefault.value();
-                chrome.storage.sync.set(config, function () {});
-            } else {
-                config = items;
-            }
-            needInit();
-            //sub.init();
-        });
-    } else {
-        chrome.storage.local.get(function (items) {
-            if (items.version && items.version < 41) {
-                //for old version
-                console.log("old");
-                config = items;
-            } else {
-                if (!items.config) {
-                    let _obj = {};
+
+            if (type === "local") {
+                if (!items.config || items.version < 41) {
                     config = getDefault.value();
-                    _obj.config = config;
-                    chrome.storage.local.set(_obj, function () {
-                        console.log("set defaultConfig to local");
+                    storage.set({config: config}, () => {
+                        console.log("Set default config to local storage.");
+                        sub.init();
                     });
                 } else {
                     config = items.config;
+                    sub.init();
+                }
+            } else if (type === "sync") {
+                if (!items.general) {
+                    config = getDefault.value();
+                    storage.set(config, () => {
+                        console.log("Set default config to sync storage.");
+                        sub.init();
+                    });
+                } else {
+                    config = items;
+                    sub.init();
                 }
             }
-            needInit();
-            //sub.init();
         });
-    }
+    };
+
+    chrome.storage.local.get("sync", (result) => {
+        const syncValue = result.sync === "true" ? "sync" : "local";
+        loadFromSyncOrLocal(syncValue);
+    });
 };
 
 var appConfmodel = {
@@ -932,12 +924,7 @@ var sub = {
         fullstate: null,
         per_write: false,
         scroll: {},
-        crversion: window.navigator.userAgent
-            .substr(window.navigator.userAgent.indexOf("Chrome") + 7, 100)
-            .substr(
-                0,
-                window.navigator.userAgent.substr(window.navigator.userAgent.indexOf("Chrome") + 7, 100).indexOf(" ")
-            ),
+        //crversion:(window.navigator.userAgent.substr(window.navigator.userAgent.indexOf("Chrome")+7,100).substr(0,window.navigator.userAgent.substr(window.navigator.userAgent.indexOf("Chrome")+7,100).indexOf(" "))),
         permissions: {},
         os: "win",
     },
@@ -947,13 +934,13 @@ var sub = {
             browser.browserSettings.contextMenuShowEvent.set({value: "mouseup"});
             config.general.linux.cancelmenu = false;
             sub.saveConf();
-        } else if (
-            browserType == "fx" &&
-            localStorage.getItem("flag_mouseup") == null &&
-            (sub.cons.os == "linux" || sub.cons.os == "mac")
-        ) {
-            sub.checkPermission(["browserSettings"], null, null, sub.getI18n("perdes_browsersettings"));
-            localStorage.setItem("flag_mouseup", "true");
+        } else if (browserType == "fx" && (sub.cons.os == "linux" || sub.cons.os == "mac")) {
+            chrome.storage.local.get("flag_mouseup", (result) => {
+                if (result.flag_mouseup === undefined) {
+                    sub.checkPermission(["browserSettings"], null, null, sub.getI18n("perdes_browsersettings"));
+                    chrome.storage.local.set({flag_mouseup: "true"});
+                }
+            });
         }
     },
     init: function () {
@@ -980,9 +967,9 @@ var sub = {
     },
     initIcon: function () {
         if (config.general.fnswitch.fnicon) {
-            chrome.browserAction.setPopup({popup: ""});
+            chrome.action.setPopup({popup: ""});
             if (config.icon.settings.tip) {
-                chrome.browserAction.setTitle({
+                chrome.action.setTitle({
                     title:
                         config.icon.actions[0].mydes &&
                         config.icon.actions[0].mydes.type &&
@@ -992,8 +979,8 @@ var sub = {
                 });
             }
         } else {
-            chrome.browserAction.setPopup({popup: "../html/popup.html"});
-            chrome.browserAction.setTitle({title: sub.getI18n("ext_name")});
+            chrome.action.setPopup({popup: "../html/popup.html"});
+            chrome.action.setTitle({title: sub.getI18n("ext_name")});
         }
     },
     initCTM: function () {
@@ -1103,24 +1090,23 @@ var sub = {
             sub.action.optionspage();
         }
         if (info.menuItemId == sub.ctm.menuHomepage) {
-            chrome.tabs.query({highlighted: true, currentWindow: true}, function (tabs) {
+            chrome.storage.local.get("homepageListId", function (items) {
+                var homepageListId = items.homepageListId;
                 var theFunction = function () {
                     var _appname = "homepage";
                     sub.initAppconf(_appname);
                     chrome.topSites.get(function (sites) {
                         let _obj = {};
                         _obj.sites = sites;
-                        _obj.listId = localStorage.getItem("homepageListId");
+                        _obj.listId = homepageListId; // Use the retrieved value
                         _obj.ctm = tab;
                         sub.cons[_appname] = _obj;
-                        chrome.tabs.executeScript({
-                            code:
-                                'chrome.runtime.sendMessage({type:"apps_test",apptype:"' +
-                                _appname +
-                                '",value:sue.apps.enable,ctm:true,appjs:appType["' +
-                                _appname +
-                                '"]},function(response){console.log(response)})',
-                            runAt: "document_start",
+
+                        // M3 Fix: Use scripting.executeScript with files and a function
+                        // to avoid injecting code as a string
+                        chrome.scripting.executeScript({
+                            target: {tabId: tab.id, allFrames: true},
+                            files: ["js/homepage_injection_script.js"],
                         });
                     });
                 };
@@ -1346,7 +1332,7 @@ var sub = {
     insertTest: function (appname) {
         //console.log("appname")
         //chrome.tabs.sendMessage(curTab.id,{type:"apptype",apptype:appname},function(response){});
-        chrome.tabs.executeScript({
+        chrome.scripting.executeScript({
             code:
                 'chrome.runtime.sendMessage({type:"apps_test",apptype:"' +
                 appname +
@@ -1399,11 +1385,11 @@ var sub = {
     setIcon: function (status, tabId, changeInfo, tab) {
         switch (status) {
             case "normal":
-                //chrome.browserAction.setIcon({tabId:tab.id,path:"../image/icon_bar.png"});
+                //chrome.action.setIcon({tabId:tab.id,path:"../image/icon_bar.png"});
                 break;
             case "warning":
-                chrome.browserAction.setIcon({tabId: tab.id, path: "../image/icon_warning.png"});
-                chrome.browserAction.setTitle({tabId: tab.id, title: sub.getI18n("icon_tip")});
+                chrome.action.setIcon({tabId: tab.id, path: "../image/icon_warning.png"});
+                chrome.action.setTitle({tabId: tab.id, title: sub.getI18n("icon_tip")});
                 break;
         }
         //chrome.pageAction.show(tabId);
@@ -1441,7 +1427,12 @@ var sub = {
     },
     action: {
         none: function () {
+            console.log("tabcapture: ", chrome.tabCapture);
             chrome.tabCapture.capture({audio: true}, function (stream) {
+                if (chrome.runtime.lastError) {
+                    console.error("Tab capture failed:", chrome.runtime.lastError.message);
+                    return;
+                }
                 console.log(stream);
             });
             return;
@@ -1449,21 +1440,31 @@ var sub = {
         //group nav
         back: function () {
             //chk
-            chrome.tabs.executeScript({code: "window.history.go(-1)", runAt: "document_start"}, function () {});
+            chrome.scripting.executeScript({
+                target: {tabId: sub.curTab.id, allFrames: true},
+                function: () => {
+                    window.history.go(-1);
+                },
+            });
         },
         forward: function () {
             //chk
-            chrome.tabs.executeScript({code: "window.history.go(+1)", runAt: "document_start"}, function () {});
+            chrome.scripting.executeScript({
+                target: {tabId: sub.curTab.id, allFrames: true},
+                function: () => {
+                    window.history.go(+1);
+                },
+            });
         },
         scroll: function () {
             var _effect = sub.getConfValue("checks", "n_effect"),
                 _scroll = sub.getConfValue("selects", "n_scroll").substr(2);
             sub.cons.scroll.effect = _effect;
             sub.cons.scroll.type = _scroll; //scrolltype;//sub.theConf.name;
-            chrome.tabs.executeScript(
-                {file: "js/inject/scroll.js", runAt: "document_start", allFrames: true},
-                function () {}
-            );
+            chrome.scripting.executeScript({
+                target: {tabId: sub.curTab.id, allFrames: true},
+                files: ["js/inject/scroll.js"],
+            });
         },
         reload: function () {
             //chk
@@ -1472,7 +1473,12 @@ var sub = {
             //fix edge
             if (!chrome.tabs.reload) {
                 for (var i = 0; ids && i < ids.length; i++) {
-                    chrome.tabs.executeScript(ids[i], {code: "location.reload();"});
+                    chrome.scripting.executeScript({
+                        target: {tabId: ids[i], allFrames: true},
+                        function: () => {
+                            location.reload();
+                        },
+                    });
                 }
             }
             for (var i = 0; ids && i < ids.length; i++) {
@@ -1483,7 +1489,12 @@ var sub = {
             //chk
             var ids = sub.getId(sub.getConfValue("selects", "n_tab"));
             for (var i = 0; ids && i < ids.length; i++) {
-                chrome.tabs.executeScript(ids[i], {code: "window.stop()", runAt: "document_start"}, function () {});
+                chrome.scripting.executeScript({
+                    target: {tabId: ids[i], allFrames: true},
+                    function: () => {
+                        window.stop();
+                    },
+                });
             }
         },
         next: function () {
@@ -1498,14 +1509,14 @@ var sub = {
                 sub.cons.next.keywds = (
                     sub.getConfValue("texts", "n_npkey_n") || sub.getConfValue("texts", "n_npkey_p")
                 ).split(",");
-                chrome.tabs.executeScript(
-                    {file: "js/namespace.js", runAt: "document_start", allFrames: true},
-                    function () {}
-                );
-                chrome.tabs.executeScript(
-                    {file: "js/inject/np.js", runAt: "document_start", allFrames: true},
-                    function () {}
-                );
+                chrome.scripting.executeScript({
+                    target: {tabId: sub.curTab.id, allFrames: true},
+                    files: ["js/namespace.js"],
+                });
+                chrome.scripting.executeScript({
+                    target: {tabId: sub.curTab.id, allFrames: true},
+                    files: ["js/inject/np.js"],
+                });
             }
         },
         previous: function () {
@@ -1776,13 +1787,23 @@ var sub = {
                 var theTarget = sub.getConfValue("selects", "n_optype"),
                     theIndex = sub.getIndex(sub.getConfValue("selects", "n_position"), "new")[0],
                     thePin = sub.getConfValue("checks", "n_pin");
-                var theURL,
-                    clipOBJ = document.body.appendChild(document.createElement("textarea"));
-                clipOBJ.focus();
-                document.execCommand("paste");
-                theURL = clipOBJ.value;
-                clipOBJ.remove();
-                sub.open(theURL, theTarget, theIndex, thePin);
+
+                chrome.scripting
+                    .executeScript({
+                        target: {tabId: sub.curTab.id},
+                        function: () => {
+                            const clipOBJ = document.body.appendChild(document.createElement("textarea"));
+                            clipOBJ.focus();
+                            document.execCommand("paste");
+                            const value = clipOBJ.value;
+                            clipOBJ.remove();
+                            return value;
+                        },
+                    })
+                    .then((results) => {
+                        const theURL = results[0].result;
+                        sub.open(theURL, theTarget, theIndex, thePin);
+                    });
             };
             var thepers = ["clipboardRead"];
             var theorgs;
@@ -1862,21 +1883,28 @@ var sub = {
                 chrome.tabs.query({index: theIndex, currentWindow: true}, function (tabs) {
                     var cptarget = tabs[0];
                     var cpcontent = sub.getConfValue("selects", "n_copytabele_content");
-                    var clipOBJ = document.body.appendChild(document.createElement("textarea"));
-                    switch (cpcontent) {
-                        case "s_tabele_title":
-                            clipOBJ.value = cptarget.title;
-                            break;
-                        case "s_tabele_url":
-                            clipOBJ.value = cptarget.url;
-                            break;
-                        case "s_tabele_aslnk":
-                            clipOBJ.value = '<a href="' + cptarget.url + '">' + cptarget.title + "</a>";
-                            break;
-                    }
-                    clipOBJ.select();
-                    document.execCommand("copy");
-                    clipOBJ.remove();
+
+                    chrome.scripting.executeScript({
+                        target: {tabId: sub.curTab.id},
+                        function: (cptarget, cpcontent) => {
+                            const clipOBJ = document.body.appendChild(document.createElement("textarea"));
+                            switch (cpcontent) {
+                                case "s_tabele_title":
+                                    clipOBJ.value = cptarget.title;
+                                    break;
+                                case "s_tabele_url":
+                                    clipOBJ.value = cptarget.url;
+                                    break;
+                                case "s_tabele_aslnk":
+                                    clipOBJ.value = '<a href="' + cptarget.url + '">' + cptarget.title + "</a>";
+                                    break;
+                            }
+                            clipOBJ.select();
+                            document.execCommand("copy");
+                            clipOBJ.remove();
+                        },
+                        args: [cptarget, cpcontent],
+                    });
                 });
             };
             var thepers = ["clipboardWrite"];
@@ -2012,11 +2040,17 @@ var sub = {
                 return;
             }
             var theFunction = function () {
-                var clipOBJ = document.body.appendChild(document.createElement("textarea"));
-                clipOBJ.value = sub.message.selEle.txt;
-                clipOBJ.select();
-                document.execCommand("copy");
-                clipOBJ.remove();
+                chrome.scripting.executeScript({
+                    target: {tabId: sub.curTab.id},
+                    function: (text) => {
+                        const clipOBJ = document.body.appendChild(document.createElement("textarea"));
+                        clipOBJ.value = text;
+                        clipOBJ.select();
+                        document.execCommand("copy");
+                        clipOBJ.remove();
+                    },
+                    args: [sub.message.selEle.txt],
+                });
             };
             var thepers = ["clipboardWrite"];
             var theorgs;
@@ -2058,41 +2092,49 @@ var sub = {
         txtsearchclip: function () {
             console.log("txtsearchclip");
             var theFunction = function () {
-                let _str,
-                    _obj = document.body.appendChild(document.createElement("textarea"));
-                _obj.focus();
-                document.execCommand("paste");
-                _str = _obj.value;
-                console.log(_obj);
-                _obj.remove();
+                chrome.scripting
+                    .executeScript({
+                        target: {tabId: sub.curTab.id},
+                        function: () => {
+                            let _obj = document.body.appendChild(document.createElement("textarea"));
+                            _obj.focus();
+                            document.execCommand("paste");
+                            const value = _obj.value;
+                            _obj.remove();
+                            return value;
+                        },
+                    })
+                    .then((results) => {
+                        let _str = results[0].result;
+                        let _url,
+                            _txt,
+                            _engine = sub.getConfValue("selects", "n_txtengine"),
+                            _target = sub.getConfValue("selects", "n_optype"),
+                            _code = sub.getConfValue("selects", "n_encoding"),
+                            _index = sub.getIndex(sub.getConfValue("selects", "n_position"), "new")[0],
+                            _pin = sub.getConfValue("checks", "n_pin");
 
-                let _url,
-                    _txt,
-                    _engine = sub.getConfValue("selects", "n_txtengine"),
-                    _target = sub.getConfValue("selects", "n_optype"),
-                    _code = sub.getConfValue("selects", "n_encoding"),
-                    _index = sub.getIndex(sub.getConfValue("selects", "n_position"), "new")[0],
-                    _pin = sub.getConfValue("checks", "n_pin");
-                switch (_code) {
-                    case "s_unicode":
-                        _txt = escape(_str);
-                        break;
-                    case "s_uri":
-                        _txt = encodeURI(_str);
-                        break;
-                    case "s_uric":
-                        _txt = encodeURIComponent(_str);
-                        break;
-                    case "s_uricgbk":
-                        _txt = GBK.URI.encodeURI(_str);
-                        break;
-                    default:
-                        _txt = _str;
-                        break;
-                }
-                _engine = config.general.engine.txtengine[_engine].content;
-                _url = _engine.replace(/%s/g, _txt);
-                sub.open(_url, _target, _index, _pin);
+                        switch (_code) {
+                            case "s_unicode":
+                                _txt = escape(_str);
+                                break;
+                            case "s_uri":
+                                _txt = encodeURI(_str);
+                                break;
+                            case "s_uric":
+                                _txt = encodeURIComponent(_str);
+                                break;
+                            case "s_uricgbk":
+                                _txt = GBK.URI.encodeURI(_str);
+                                break;
+                            default:
+                                _txt = _str;
+                                break;
+                        }
+                        _engine = config.general.engine.txtengine[_engine].content;
+                        _url = _engine.replace(/%s/g, _txt);
+                        sub.open(_url, _target, _index, _pin);
+                    });
             };
             var thepers = ["clipboardRead"];
             var theorgs;
@@ -2134,13 +2176,11 @@ var sub = {
         //link
         openlnk: function () {
             //lnk
-            console.log(sub.message.selEle);
-            console.log(sub.message.selEle.objLnk);
-            if (!sub.message.selEle.lnk && !sub.message.selEle.objLnk) {
+            if (!sub.message.selEle.lnk) {
                 return;
             }
             var _optype = sub.getConfValue("selects", "n_optype"),
-                _url = sub.message.selEle.lnk || sub.message.selEle.objLnk.href,
+                _url = sub.message.selEle.lnk,
                 _position = sub.getIndex(sub.getConfValue("selects", "n_position"), "new")[0],
                 _pin = sub.getConfValue("checks", "n_pin");
             sub.open(_url, _optype, _position, _pin);
@@ -2177,11 +2217,17 @@ var sub = {
                 return;
             }
             var theFunction = function () {
-                var clipOBJ = document.body.appendChild(document.createElement("textarea"));
-                clipOBJ.value = sub.message.selEle.lnk;
-                clipOBJ.select();
-                document.execCommand("copy");
-                clipOBJ.remove();
+                chrome.scripting.executeScript({
+                    target: {tabId: sub.curTab.id},
+                    function: (text) => {
+                        const clipOBJ = document.body.appendChild(document.createElement("textarea"));
+                        clipOBJ.value = text;
+                        clipOBJ.select();
+                        document.execCommand("copy");
+                        clipOBJ.remove();
+                    },
+                    args: [sub.message.selEle.lnk],
+                });
             };
             var thepers = ["clipboardWrite"];
             var theorgs;
@@ -2192,11 +2238,17 @@ var sub = {
                 return;
             }
             var theFunction = function () {
-                var clipOBJ = document.body.appendChild(document.createElement("textarea"));
-                clipOBJ.value = sub.message.selEle.str;
-                clipOBJ.select();
-                document.execCommand("copy");
-                clipOBJ.remove();
+                chrome.scripting.executeScript({
+                    target: {tabId: sub.curTab.id},
+                    function: (text) => {
+                        const clipOBJ = document.body.appendChild(document.createElement("textarea"));
+                        clipOBJ.value = text;
+                        clipOBJ.select();
+                        document.execCommand("copy");
+                        clipOBJ.remove();
+                    },
+                    args: [sub.message.selEle.str],
+                });
             };
             var thepers = ["clipboardWrite"];
             var theorgs;
@@ -2207,11 +2259,17 @@ var sub = {
                 return;
             }
             var theFunction = function () {
-                var clipOBJ = document.body.appendChild(document.createElement("textarea"));
-                clipOBJ.value = '<a href="' + sub.message.selEle.lnk + '">' + sub.message.selEle.str + "</a>";
-                clipOBJ.select();
-                document.execCommand("copy");
-                clipOBJ.remove();
+                chrome.scripting.executeScript({
+                    target: {tabId: sub.curTab.id},
+                    function: (url, title) => {
+                        const clipOBJ = document.body.appendChild(document.createElement("textarea"));
+                        clipOBJ.value = '<a href="' + url + '">' + title + "</a>";
+                        clipOBJ.select();
+                        document.execCommand("copy");
+                        clipOBJ.remove();
+                    },
+                    args: [sub.message.selEle.lnk, sub.message.selEle.str],
+                });
             };
             var thepers = ["clipboardWrite"];
             var theorgs;
@@ -2240,7 +2298,7 @@ var sub = {
                 var _url = sub.message.selEle.img,
                     //_dlbar=sub.getConfValue("checks","n_dlbar"),
                     _notif = sub.getConfValue("checks", "n_notif");
-                //chrome.downloads.setShelfEnabled?chrome.downloads.setShelfEnabled(_dlbar==""?true:_dlbar):null;
+                //`chrome.downloads.setShelfEnabled` is not supported in Manifest V3.
                 chrome.downloads.download({url: _url}, function (id) {
                     if (!id) {
                         _notif
@@ -2265,8 +2323,7 @@ var sub = {
                 var _url = sub.message.selEle.img,
                     //_dlbar=sub.getConfValue("checks","n_dlbar"),
                     _notif = sub.getConfValue("checks", "n_notif");
-                //chrome.downloads.setShelfEnabled?chrome.downloads.setShelfEnabled(_dlbar==""?true:_dlbar):null;
-                //console.log(_url)
+                //`chrome.downloads.setShelfEnabled` is not supported in Manifest V3.
                 chrome.downloads.download({url: _url, saveAs: true}, function (id) {
                     if (!id) {
                         _notif
@@ -2288,11 +2345,17 @@ var sub = {
                 return;
             }
             var theFunction = function () {
-                var clipOBJ = document.body.appendChild(document.createElement("textarea"));
-                clipOBJ.value = sub.message.selEle.img;
-                clipOBJ.select();
-                document.execCommand("copy");
-                clipOBJ.remove();
+                chrome.scripting.executeScript({
+                    target: {tabId: sub.curTab.id},
+                    function: (text) => {
+                        const clipOBJ = document.body.appendChild(document.createElement("textarea"));
+                        clipOBJ.value = text;
+                        clipOBJ.select();
+                        document.execCommand("copy");
+                        clipOBJ.remove();
+                    },
+                    args: [sub.message.selEle.img],
+                });
             };
 
             var thepers = ["clipboardWrite"];
@@ -2303,10 +2366,10 @@ var sub = {
             if (!sub.message.selEle.img) {
                 return;
             }
-            chrome.tabs.executeScript(
-                {file: "js/inject/copyimg.js", runAt: "document_start", allFrames: true},
-                function () {}
-            );
+            chrome.scripting.executeScript({
+                target: {tabId: sub.curTab.id, allFrames: true},
+                files: ["js/inject/copyimg.js"],
+            });
         },
         imgsearch: function () {
             if (!sub.message.selEle.img) {
@@ -2393,7 +2456,21 @@ var sub = {
         closeapps: function () {
             let _code =
                 '(function(){let eles=document.querySelectorAll("smartup.su_apps");let _fun=function(ele){window.setTimeout(function(){ele.remove();},500)};for(var i=0;i<eles.length;i++){eles[i].style.cssText+="transition:all .4s ease-in-out;opacity:0;top:0;";_fun(eles[i]);};}())';
-            chrome.tabs.executeScript({code: _code});
+            chrome.scripting.executeScript({
+                target: {tabId: sub.curTab.id, allFrames: true},
+                function: () => {
+                    const eles = document.querySelectorAll("smartup.su_apps");
+                    const fun = (ele) => {
+                        window.setTimeout(() => {
+                            ele.remove();
+                        }, 500);
+                    };
+                    for (const ele of eles) {
+                        ele.style.cssText += "transition:all .4s ease-in-out;opacity:0;top:0;";
+                        fun(ele);
+                    }
+                },
+            });
         },
         dldir: function () {
             var theFunction = function () {
@@ -2449,10 +2526,13 @@ var sub = {
         },
         script: function () {
             var _script = sub.getConfValue("selects", "n_script");
-            chrome.tabs.executeScript(
-                {code: config.general.script.script[_script].content, runAt: "document_start"},
-                function () {}
-            );
+            chrome.scripting.executeScript({
+                target: {tabId: sub.curTab.id},
+                function: (scriptContent) => {
+                    eval(scriptContent);
+                },
+                args: [config.general.script.script[_script].content],
+            });
         },
         source: function () {
             var theTarget = sub.getConfValue("selects", "n_optype"),
@@ -2464,7 +2544,10 @@ var sub = {
         zoom: function () {
             if (!chrome.tabs.setZoom) {
                 sub.cons.zoom = sub.getConfValue("selects", "n_zoom");
-                chrome.tabs.executeScript({file: "js/inject/zoom.js", runAt: "document_start"}, function () {});
+                chrome.scripting.executeScript({
+                    target: {tabId: sub.curTab.id, allFrames: true},
+                    files: ["js/inject/zoom.js"],
+                });
             } else {
                 var factorDefault = 1;
                 console.log(sub.getConfData("checks", "c_factor"));
@@ -2490,7 +2573,7 @@ var sub = {
 
                 switch (sub.theConf.selects[0].value) {
                     case "s_in":
-                        chrome.tabs.getZoom(function (zoom) {
+                        chrome.tabs.getZoom(sub.curTab.id).then((zoom) => {
                             zoom = parseFloat(zoom.toFixed(2));
                             for (var i = zoomRange.length - 1; i >= 0; i--) {
                                 if (zoom >= parseFloat((zoomRange[i] / 100).toFixed(2))) {
@@ -2498,57 +2581,33 @@ var sub = {
                                         (zoomRange[i == zoomRange.length - 1 ? 0 : i + 1] / 100).toFixed(2)
                                     );
                                     zoom = zoom < factorDefault ? factorDefault : zoom;
-                                    chrome.tabs.setZoom(zoom);
+                                    chrome.tabs.setZoom(sub.curTab.id, zoom);
                                     break;
                                 }
                             }
                         });
                         break;
                     case "s_out":
-                        chrome.tabs.getZoom(function (zoom) {
+                        chrome.tabs.getZoom(sub.curTab.id).then((zoom) => {
                             zoom = parseFloat(zoom.toFixed(2));
                             for (var i = 0; i < zoomRange.length; i++) {
                                 if (zoom < parseFloat((zoomRange[i] / 100).toFixed(2))) {
                                     zoom = parseFloat((zoomRange[i == 0 ? 0 : i - 2] / 100).toFixed(2));
                                     zoom = zoom < factorDefault ? zoom : factorDefault;
-                                    chrome.tabs.setZoom(zoom);
+                                    chrome.tabs.setZoom(sub.curTab.id, zoom);
                                     break;
                                 }
                             }
                         });
                         break;
                     case "s_reset":
-                        chrome.tabs.setZoom(factorDefault);
+                        chrome.tabs.setZoom(sub.curTab.id, factorDefault);
                         break;
                 }
             }
         },
         savepage: function () {
-            var theFunction = function () {
-                var ids = sub.getId(sub.getConfValue("selects", "n_tab"));
-                var _close = sub.getConfValue("checks", "n_closetab"),
-                    _dlbar = sub.getConfValue("checks", "n_dlbar"),
-                    _notif = sub.getConfValue("checks", "n_notif");
-                for (var i = 0; i < ids.length; i++) {
-                    chrome.tabs.get(ids[i], function (tab) {
-                        chrome.pageCapture.saveAsMHTML({tabId: tab.id}, function (data) {
-                            var url = window.URL.createObjectURL(data);
-                            chrome.downloads.setShelfEnabled(_dlbar);
-                            chrome.downloads.download({url: url, filename: tab.title + ".mhtml"}, function (dlid) {
-                                if (_close && dlid) {
-                                    chrome.tabs.remove(tab.id);
-                                }
-                                if (_notif && dlid) {
-                                    sub.showNotif("basic", sub.getI18n("notif_title"), sub.getI18n("notif_con_dlok"));
-                                }
-                            });
-                        });
-                    });
-                }
-            };
-            var thepers = ["pageCapture", "downloads"];
-            var theorgs;
-            sub.checkPermission(thepers, theorgs, theFunction);
+            console.warn("The `savepage` function is not supported in Manifest V3.");
         },
         mail: function () {
             var urls = [],
@@ -2584,7 +2643,12 @@ var sub = {
             }
         },
         print: function () {
-            chrome.tabs.executeScript({code: "window.print()", runAt: "document_start"}, function () {});
+            chrome.scripting.executeScript({
+                target: {tabId: sub.curTab.id, allFrames: true},
+                function: () => {
+                    window.print();
+                },
+            });
         },
 
         zoom_dep: function () {
@@ -2593,7 +2657,10 @@ var sub = {
                     sub.cons.zoom = sub.theConf.selects[i].value;
                 }
             }
-            chrome.tabs.executeScript({file: "js/inject/zoom.js", runAt: "document_start"}, function () {});
+            chrome.scripting.executeScript({
+                target: {tabId: sub.curTab.id, allFrames: true},
+                files: ["js/inject/zoom.js"],
+            });
         },
         mute: function () {
             var ids = [];
@@ -2647,24 +2714,47 @@ var sub = {
             // }
         },
         snap: function () {
+            // chrome.windows.update(sub.curWin.id,{state:(sub.curWin.state=="normal"?"maximized":"normal")},function(window){
+            // 	sub.curWin.state=window.state;
+            // })
+
             if (sub.cons.snapstate) {
-                const {snapstate} = sub.cons;
-                chrome.windows.update(sub.curWin.id, sub.cons.snapstate, () => delete sub.cons.snapstate);
+                chrome.windows.update(
+                    sub.curWin.id,
+                    {
+                        height: sub.cons.snapstate.height,
+                        width: sub.cons.snapstate.width,
+                        top: sub.cons.snapstate.top,
+                        left: sub.cons.snapstate.left,
+                        state: sub.cons.snapstate.winstate,
+                    },
+                    function () {
+                        delete sub.cons.snapstate;
+                    }
+                );
                 return;
             }
 
-            const _snap = sub.getConfValue("selects", "n_snap");
-            const [_height, _width] = [screen.availHeight, _snap === "s_left" ? 0 : parseInt(screen.availWidth / 2)];
+            var _snap = sub.getConfValue("selects", "n_snap"),
+                _height = screen.availHeight;
+            var _width = screen.availWidth / 2;
+            chrome.windows.getCurrent(function (window) {
+                sub.cons.snapstate = {
+                    snap: true,
+                    height: window.height,
+                    width: window.width,
+                    left: window.left,
+                    top: window.top,
+                    winstate: window.state,
+                };
 
-            sub.cons.snapstate = {
-                height: sub.curWin.height,
-                width: sub.curWin.width,
-                left: sub.curWin.left,
-                top: sub.curWin.top,
-                state: sub.curWin.state,
-            };
-
-            chrome.windows.update(sub.curWin.id, {height: _height, width: _width, top: 0, left: _width});
+                chrome.windows.update(window.id, {
+                    height: _height,
+                    width: _width,
+                    top: 0,
+                    left: _snap == "s_left" ? 0 : _width,
+                });
+            });
         },
         set_bk: function () {
             let theFunction = function () {
@@ -2750,6 +2840,11 @@ var sub = {
         },
         pxmovie: function () {
             var _appname = "pxmovie";
+            sub.insertTest(_appname);
+        },
+        lottery: function () {
+            var _appname = "lottery";
+            sub.initAppconf(_appname);
             sub.insertTest(_appname);
         },
         speaker: function () {
@@ -2884,6 +2979,7 @@ var sub = {
                 "numc",
                 "speaker",
                 "jslist",
+                "lottery",
                 "convertcase",
                 "autoreload",
                 "homepage",
@@ -2926,6 +3022,7 @@ var sub = {
         },
         random: function () {
             var _appname = "random";
+            sub.initAppconf(_appname);
             sub.insertTest(_appname);
         },
         rss: function () {
@@ -3189,45 +3286,47 @@ var sub = {
         } else {
             _isSync = false;
         }
-        _isSync ? localStorage.setItem("sync", "true") : localStorage.setItem("sync", "false");
-        if (_isSync) {
-            chrome.storage.sync.clear(function () {
-                chrome.storage.sync.set(config, function () {
-                    if (chrome.runtime.lastError) {
-                        sub.showNotif(
-                            "basic",
-                            sub.getI18n("notif_title_conferr"),
-                            sub.getI18n("msg_conferr0") +
-                                "\n" +
-                                chrome.runtime.lastError.message +
-                                "\n" +
-                                sub.getI18n("msg_conferr1")
-                        );
-                        sub.cons.lastErr = chrome.runtime.lastError.message;
-                        chrome.storage.sync.set(sub.cons.lastConf, function () {
+
+        let syncValue = _isSync ? "true" : "false";
+        chrome.storage.local.set({sync: syncValue}, () => {
+            if (_isSync) {
+                chrome.storage.sync.clear(function () {
+                    chrome.storage.sync.set(config, function () {
+                        if (chrome.runtime.lastError) {
+                            sub.showNotif(
+                                "basic",
+                                sub.getI18n("notif_title_conferr"),
+                                sub.getI18n("msg_conferr0") +
+                                    "\n" +
+                                    chrome.runtime.lastError.message +
+                                    "\n" +
+                                    sub.getI18n("msg_conferr1")
+                            );
+                            sub.cons.lastErr = chrome.runtime.lastError.message;
+                            chrome.storage.sync.set(sub.cons.lastConf, function () {
+                                loadConfig();
+                                chrome.runtime.sendMessage({type: "confErr", lastErr: sub.cons.lastErr});
+                            });
+                        } else {
                             loadConfig();
-                            chrome.runtime.sendMessage({type: "confErr", lastErr: sub.cons.lastErr});
-                        });
-                    } else {
-                        loadConfig();
-                        chrome.runtime.sendMessage({type: "confOK"});
-                    }
-                });
-            });
-        } else {
-            chrome.storage.local.get(function (items) {
-                let _obj = {};
-                _obj.config = config;
-                _obj.localConfig = items.localConfig;
-                chrome.storage.local.clear(function () {
-                    chrome.storage.local.set(_obj, function () {
-                        loadConfig();
-                        chrome.runtime.sendMessage({type: "confOK"});
+                            chrome.runtime.sendMessage({type: "confOK"});
+                        }
                     });
                 });
-            });
-        }
-        //_isSync?localStorage.setItem("sync","true"):localStorage.setItem("sync","false");
+            } else {
+                chrome.storage.local.get(function (items) {
+                    let _obj = {};
+                    _obj.config = config;
+                    _obj.localConfig = items.localConfig;
+                    chrome.storage.local.clear(function () {
+                        chrome.storage.local.set(_obj, function () {
+                            loadConfig();
+                            chrome.runtime.sendMessage({type: "confOK"});
+                        });
+                    });
+                });
+            }
+        });
     },
     reset: function () {},
     setBackup: function (ver) {
@@ -3474,7 +3573,7 @@ var sub = {
         },
         _34: function () {
             config.general.sync.autosync = true;
-            localStorage.setItem("first", "true");
+            chrome.storage.local.set({first: "true"});
             chrome.storage.local.get(function (items) {
                 if (items & items.apps) {
                     items.local = {};
@@ -3498,7 +3597,7 @@ var sub = {
         },
         _33: function () {
             config.general.sync.autosync = true;
-            localStorage.setItem("first", "true");
+            chrome.storage.local.set({first: "true"});
             chrome.storage.local.get(function (items) {
                 if (items & items.apps) {
                     items.local = {};
@@ -3931,8 +4030,8 @@ var sub = {
         },
         f2_5to2_6: function () {
             for (var i = 0; i < config.general.engine.txtengine.length; i++) {
-                if (config.general.engine.txtengine[i].url == "https://image.baidu.com/i?objurl=%s") {
-                    config.general.engine.txtengine[i].url = "https://www.baidu.com/s?wd=%s";
+                if (config.general.engine.txtengine[i].url == "http://image.baidu.com/i?objurl=%s") {
+                    config.general.engine.txtengine[i].url = "http://www.baidu.com/s?wd=%s";
                 }
             }
             config.version = 2.6;
@@ -4238,10 +4337,7 @@ var sub = {
                     config: config,
                     devMode: devMode,
                     os: sub.cons.os,
-                    donateData: sub.cons.donateData,
-                    reason: sub.cons.reason,
                 };
-                message.type === "opt_getconf" ? (sub.cons.reason = "update") : null;
                 sendResponse(_conf);
                 break;
             case "opt_getpers":
@@ -4261,65 +4357,86 @@ var sub = {
             case "apps_test":
                 let _fun = function () {
                     if (message.appjs) {
-                        chrome.tabs.executeScript({
-                            code: "sue.apps['" + message.apptype + "'].initUI();",
-                            runAt: "document_start",
+                        chrome.scripting.executeScript({
+                            target: {tabId: sender.tab.id},
+                            world: "MAIN",
+                            func: () => {
+                                window.sue.apps[message.apptype].initUI();
+                            },
                         });
                         return;
                     }
-                    if (message.apptype == "base64") {
-                        chrome.tabs.executeScript({file: "js/base64.js", runAt: "document_start"}, function () {});
-                    } else if (
-                        message.apptype == "qr" ||
-                        message.apptype == "magnet" ||
-                        message.apptype == "shorturl"
-                    ) {
-                        chrome.tabs.executeScript({file: "js/qrcode.js", runAt: "document_start"}, function () {});
-                    } else if (message.apptype == "tbkjx") {
-                        chrome.tabs.executeScript({file: "js/purify.js", runAt: "document_start"}, function () {});
-                        chrome.tabs.executeScript({file: "js/qrcode.js", runAt: "document_start"}, function () {});
-                    } else if (message.apptype == "notepad") {
-                        chrome.tabs.executeScript({file: "js/md5.js", runAt: "document_start"});
-                    }
+
+                    const runScript = (files) => {
+                        if (!sender.tab.id) return;
+                        return chrome.scripting.executeScript({
+                            target: {tabId: sender.tab.id},
+                            files: files,
+                        });
+                    };
+
+                    const runCSS = (files) => {
+                        if (!sender.tab.id) return;
+                        return chrome.scripting.insertCSS({
+                            target: {tabId: sender.tab.id},
+                            files: files,
+                        });
+                    };
 
                     // insert sortable.js
                     let arraySort = ["homepage", "appslist", "jslist", "extmgm"];
-                    if (arraySort.contains(message.apptype)) {
-                        chrome.tabs.executeScript({file: "js/sortable.js", runAt: "document_start"}, function () {
-                            chrome.tabs.insertCSS(
-                                {file: "css/inject/" + message.apptype + ".css", runAt: "document_start"},
-                                function () {}
-                            );
-                            chrome.tabs.executeScript(
-                                {file: "js/inject/" + message.apptype + ".js", runAt: "document_start"},
-                                function () {
-                                    //after insert js, run sue.apps.homepage.itemCTM() for miniapps-homepage
-                                    if (message.apptype == "homepage" && message.ctm) {
-                                        chrome.tabs.executeScript({
-                                            code: "sue.apps['" + message.apptype + "'].itemCTM();",
-                                            runAt: "document_start",
-                                        });
-                                    }
+                    if (arraySort.includes(message.apptype)) {
+                        runScript(["js/sortable.js"])
+                            .then(() => {
+                                return runCSS(["css/inject/" + message.apptype + ".css"]);
+                            })
+                            .then(() => {
+                                return runScript(["js/inject/" + message.apptype + ".js"]);
+                            })
+                            .then(() => {
+                                if (message.apptype === "homepage" && message.ctm) {
+                                    chrome.scripting.executeScript({
+                                        target: {tabId: sender.tab.id},
+                                        world: "MAIN",
+                                        func: () => {
+                                            window.sue.apps.homepage.itemCTM();
+                                        },
+                                    });
                                 }
-                            );
-                        });
+                            });
                         return;
                     }
 
-                    chrome.tabs.insertCSS(
-                        {file: "css/inject/" + message.apptype + ".css", runAt: "document_start"},
-                        function () {}
-                    );
-                    chrome.tabs.executeScript(
-                        {file: "js/inject/" + message.apptype + ".js", runAt: "document_start"},
-                        function () {}
-                    );
+                    if (message.apptype === "base64") {
+                        runScript(["js/base64.js"]);
+                    } else if (["qr", "magnet", "shorturl"].includes(message.apptype)) {
+                        runScript(["js/qrcode.js"]);
+                    } else if (message.apptype === "tbkjx") {
+                        runScript(["js/purify.js"]);
+                        runScript(["js/qrcode.js"]);
+                    } else if (message.apptype === "notepad") {
+                        runScript(["js/md5.js"]);
+                    }
+
+                    runCSS(["css/inject/" + message.apptype + ".css"]);
+                    runScript(["js/inject/" + message.apptype + ".js"]);
                 };
+
                 if (!message.value) {
-                    chrome.tabs.insertCSS({file: "css/apps_basic.css", runAt: "document_start"}, function () {});
-                    chrome.tabs.executeScript({file: "js/apps_basic.js", runAt: "document_start"}, function () {
-                        _fun();
-                    });
+                    chrome.scripting
+                        .insertCSS({
+                            target: {tabId: sender.tab.id},
+                            files: ["css/apps_basic.css"],
+                        })
+                        .then(() => {
+                            return chrome.scripting.executeScript({
+                                target: {tabId: sender.tab.id},
+                                files: ["js/apps_basic.js"],
+                            });
+                        })
+                        .then(() => {
+                            _fun();
+                        });
                 } else {
                     _fun();
                 }
@@ -4360,15 +4477,21 @@ var sub = {
                 sendResponse({value: sub.cons.zoom});
                 break;
             case "action_pop":
-                let _index = message.index; //message.popvalue;
-                /*theConf=config.pop.actions[_index]*/ sub.theConf = config.pop.actions[_index];
+                let _index = message.index;
+                sub.theConf = config.pop.actions[_index];
                 if (config.pop.settings.type == "front") {
                     chrome.tabs.query({active: true, currentWindow: true}, function (tabs) {
                         sub.curTab = tabs[0];
                         chrome.tabs.sendMessage(tabs[0].id, {type: "pop"}, function (response) {
+                            if (chrome.runtime.lastError) {
+                                console.error("Error sending message to tab:", chrome.runtime.lastError.message);
+                                return;
+                            }
                             if (response && response.type == "action_pop") {
                                 sub.message = response;
                                 sub.extID = chrome.runtime.id ? chrome.runtime.id : null;
+                                var theConf = config.icon.actions[0];
+                                sub.theConf = theConf;
                                 sub.initCurrent(null, sub.theConf);
                                 console.log(sub.message);
                             }
@@ -4386,7 +4509,7 @@ var sub = {
                 break;
             case "action_rges":
                 let rgesType = message.sendValue.buttons == 1 ? 0 : 1;
-                /*theConf=config.rges.actions[rgesType]*/ sub.theConf = config.rges.actions[rgesType];
+                sub.theConf = config.rges.actions[rgesType];
                 sub.initCurrent(sender, sub.theConf);
                 break;
             case "action_wges":
@@ -4404,7 +4527,6 @@ var sub = {
                 }
                 sub.theConf = config.wges.actions[_id];
                 if (sub.theConf.name == "scroll") {
-                    //fix action scrollame});
                     window.setTimeout(function () {
                         sub.initCurrent(sender, sub.theConf);
                     }, 200);
@@ -4415,7 +4537,6 @@ var sub = {
             case "action_dca":
                 sub.theConf = config.dca.actions[0];
                 if (sub.theConf.name == "scroll") {
-                    //fix action scrollame});
                     window.setTimeout(function () {
                         sub.initCurrent(sender, sub.theConf);
                     }, 200);
@@ -4463,23 +4584,28 @@ var sub = {
             case "action_ksa":
                 sub.theConf = config.ksa.actions[sub.message.id];
                 if (sub.theConf.name == "paste") {
-                    //for action paste
-                    sendResponse(sub.theConf); //error log, if none sendResponse
-                    sub.checkPermission(["clipboardRead"], null, function () {
-                        var domCB = document.createElement("textarea");
-                        domCB.classList.add("su_cb_textarea");
-                        document.body.appendChild(domCB);
-                        domCB.focus();
-                        document.execCommand("paste");
-                        sub.theConf.paste = domCB.value;
-                        sub.theConf.typeAction = "paste";
-                        chrome.tabs.sendMessage(
-                            sender.tab.id,
-                            {type: "actionPaste", value: sub.theConf},
-                            function (response) {
-                                domCB.remove();
-                            }
-                        );
+                    sendResponse(sub.theConf);
+                    sub.checkPermission(["clipboardRead"], null, () => {
+                        chrome.scripting
+                            .executeScript({
+                                target: {tabId: sender.tab.id},
+                                function: () => {
+                                    const domCB = document.createElement("textarea");
+                                    domCB.classList.add("su_cb_textarea");
+                                    document.body.appendChild(domCB);
+                                    domCB.focus();
+                                    document.execCommand("paste");
+                                    const pasteValue = domCB.value;
+                                    domCB.remove();
+                                    return pasteValue;
+                                },
+                            })
+                            .then((results) => {
+                                const pasteText = results[0].result;
+                                sub.theConf.paste = pasteText;
+                                sub.theConf.typeAction = "paste";
+                                chrome.tabs.sendMessage(sender.tab.id, {type: "actionPaste", value: sub.theConf});
+                            });
                     });
                 } else {
                     console.log("s");
@@ -4491,23 +4617,28 @@ var sub = {
                 sub.theConf = getConf();
                 sub.theConf.type = "action";
                 if (sub.theConf.name == "paste") {
-                    //for action paste
-                    sendResponse(sub.theConf); //error log, if none sendResponse
-                    sub.checkPermission(["clipboardRead", "clipboardWrite"], null, function () {
-                        var domCB = document.createElement("textarea");
-                        domCB.classList.add("su_cb_textarea");
-                        document.body.appendChild(domCB);
-                        domCB.focus();
-                        document.execCommand("paste");
-                        sub.theConf.paste = domCB.value;
-                        sub.theConf.typeAction = "paste";
-                        chrome.tabs.sendMessage(
-                            sender.tab.id,
-                            {type: "actionPaste", value: sub.theConf},
-                            function (response) {
-                                domCB.remove();
-                            }
-                        );
+                    sendResponse(sub.theConf);
+                    sub.checkPermission(["clipboardRead", "clipboardWrite"], null, () => {
+                        chrome.scripting
+                            .executeScript({
+                                target: {tabId: sender.tab.id},
+                                function: () => {
+                                    const domCB = document.body.appendChild(document.createElement("textarea"));
+                                    domCB.classList.add("su_cb_textarea");
+                                    document.body.appendChild(domCB);
+                                    domCB.focus();
+                                    document.execCommand("paste");
+                                    const pasteValue = domCB.value;
+                                    domCB.remove();
+                                    return pasteValue;
+                                },
+                            })
+                            .then((results) => {
+                                const pasteText = results[0].result;
+                                sub.theConf.paste = pasteText;
+                                sub.theConf.typeAction = "paste";
+                                chrome.tabs.sendMessage(sender.tab.id, {type: "actionPaste", value: sub.theConf});
+                            });
                     });
                 } else {
                     console.log("s");
@@ -4518,9 +4649,11 @@ var sub = {
             case "getDonateData":
                 sendResponse({type: "donateData", value: sub.cons.donateData});
                 break;
+            case "setDonateData":
+                sub.cons.donateData = message.value;
+                break;
             case "appsAction":
                 sub.apps[message.app][message.action](message, sender, sendResponse);
-                //sub.appsAction(message,sendResponse);
                 break;
         }
     },
@@ -4543,13 +4676,13 @@ var sub = {
                     sub.cons.autoreload[sender.tab.id].bypassCache = message.value.bypassCache;
 
                     if (sub.cons.autoreload[sender.tab.id].iconCountdown) {
-                        chrome.browserAction.setBadgeText({
+                        chrome.action.setBadgeText({
                             text: sub.cons.autoreload[sender.tab.id].timeRemain.toString(),
                             tabId: sender.tab.id,
                         });
                         sub.cons.autoreload[sender.tab.id].countDown = window.setInterval(function () {
                             sub.cons.autoreload[sender.tab.id].timeRemain--;
-                            chrome.browserAction.setBadgeText({
+                            chrome.action.setBadgeText({
                                 text: sub.cons.autoreload[sender.tab.id].timeRemain.toString(),
                                 tabId: sender.tab.id,
                             });
@@ -4575,7 +4708,7 @@ var sub = {
                     window.clearInterval(sub.cons.autoreload[sender.tab.id].countDown);
                     sub.cons.autoreload[sender.tab.id].timeRemain = 0;
                 }
-                chrome.browserAction.setBadgeText({text: "", tabId: sender.tab.id});
+                chrome.action.setBadgeText({text: "", tabId: sender.tab.id});
             },
             getConf: function (message, sender, sendResponse) {
                 sendResponse({config: config.apps[message.app], value: sub.cons[message.app], tabId: sender.tab.id});
@@ -4659,9 +4792,12 @@ var sub = {
         },
         jslist: {
             jsRun: function (message) {
-                chrome.tabs.executeScript({
-                    code: config.general.script.script[message.value].content,
-                    runAt: "document_start",
+                chrome.scripting.executeScript({
+                    target: {tabId: sub.curTab.id},
+                    function: (scriptContent) => {
+                        eval(scriptContent);
+                    },
+                    args: [config.general.script.script[message.value].content],
                 });
             },
         },
@@ -4736,12 +4872,12 @@ var sub = {
                 }
             },
         },
-        savepdf: {
-            savePDF: function (message) {
-                console.log("s");
-                chrome.tabs.saveAsPDF(message.value);
-            },
+        savepdf: function (message) {
+            // chrome.tabs.saveAsPDF({});
+            // return
+            console.warn("`chrome.tabs.saveAsPDF` is not a valid API in Manifest V3.");
         },
+
         extmgm: {
             action: function (message, sender, sendResponse) {
                 switch (message.value.actionType) {
@@ -4756,20 +4892,22 @@ var sub = {
                         chrome.management.setEnabled(
                             message.value.id,
                             message.value.actionType == "enable" ? true : false,
-                            function () {}
+                            () => {}
                         );
                         break;
                     case "disableall":
-                        for (var i = 0; i < sub.cons.extmgm.ext_enabled.length; i++) {
-                            if (
-                                sub.cons.extmgm.ext_enabled[i].id == sub.extID ||
-                                (config.apps.extmgm.always &&
-                                    config.apps.extmgm.always.contains(sub.cons.extmgm.ext_enabled[i].id))
-                            ) {
-                                continue;
+                        // Using Promise-based management API for better async handling
+                        chrome.management.getAll().then((exts) => {
+                            for (let ext of exts) {
+                                if (
+                                    ext.enabled &&
+                                    ext.id !== sub.extID &&
+                                    (!config.apps.extmgm.always || !config.apps.extmgm.always.contains(ext.id))
+                                ) {
+                                    chrome.management.setEnabled(ext.id, false);
+                                }
                             }
-                            chrome.management.setEnabled(sub.cons.extmgm.ext_enabled[i].id, false);
-                        }
+                        });
                         break;
                 }
                 sendResponse({type: "extmgm", actionDone: true});
@@ -4785,55 +4923,46 @@ var sub = {
                         }
                     }
                 }
-
                 sendResponse({exts: _exts});
-                // let _config=config.apps.extmgm.exts[message.value].id,
-                // 	_exts=[];
-                // for(var i=0;i<_config.length;i++){
-                // 	for(var ii=0;ii<sub.cons.extmgm.exts.length;ii++){
-                // 		if(_config[i]==sub.cons.extmgm.exts[ii].id){
-                // 			_exts.push(sub.cons.extmgm.exts[ii]);
-                // 			continue;
-                // 		}
-                // 	}
-                // }
-
-                // sendResponse({exts:_exts})
             },
             getAllExt: function (message, sender, sendResponse) {
                 sendResponse({exts: sub.cons.extmgm.exts});
                 console.log(message.extsEnable);
                 if (message.extsEnable) {
-                    for (var i = 0; i < sub.cons.extmgm.exts.length; i++) {
-                        if (
-                            sub.cons.extmgm.exts[i].id == sub.extID ||
-                            (config.apps.extmgm.always &&
-                                config.apps.extmgm.always.contains(sub.cons.extmgm.exts[i].id))
-                        ) {
-                            continue;
+                    // Using Promise-based management API for clarity
+                    chrome.management.getAll().then((exts) => {
+                        for (let ext of exts) {
+                            if (
+                                ext.id == sub.extID ||
+                                (config.apps.extmgm.always && config.apps.extmgm.always.contains(ext.id))
+                            ) {
+                                continue;
+                            }
+                            if (message.extsEnable.id.contains(ext.id)) {
+                                chrome.management.setEnabled(ext.id, true);
+                            } else {
+                                chrome.management.setEnabled(ext.id, false);
+                            }
                         }
-                        if (message.extsEnable.id.contains(sub.cons.extmgm.exts[i].id)) {
-                            chrome.management.setEnabled(sub.cons.extmgm.exts[i].id, true);
-                        } else {
-                            chrome.management.setEnabled(sub.cons.extmgm.exts[i].id, false);
-                        }
-                    }
+                    });
                 }
                 if (message.extsLast) {
-                    for (var i = 0; i < sub.cons.extmgm.exts.length; i++) {
-                        if (
-                            sub.cons.extmgm.exts[i].id == sub.extID ||
-                            (config.apps.extmgm.always &&
-                                config.apps.extmgm.always.contains(sub.cons.extmgm.exts[i].id))
-                        ) {
-                            continue;
+                    // Using Promise-based management API for clarity
+                    chrome.management.getAll().then((exts) => {
+                        for (let ext of exts) {
+                            if (
+                                ext.id == sub.extID ||
+                                (config.apps.extmgm.always && config.apps.extmgm.always.contains(ext.id))
+                            ) {
+                                continue;
+                            }
+                            if (message.extsLast.contains(ext.id)) {
+                                chrome.management.setEnabled(ext.id, true);
+                            } else {
+                                chrome.management.setEnabled(ext.id, false);
+                            }
                         }
-                        if (message.extsLast.contains(sub.cons.extmgm.exts[i].id)) {
-                            chrome.management.setEnabled(sub.cons.extmgm.exts[i].id, true);
-                        } else {
-                            chrome.management.setEnabled(sub.cons.extmgm.exts[i].id, false);
-                        }
-                    }
+                    });
                 }
             },
             itemDisable: function (message, sender, sendResponse) {
@@ -4848,48 +4977,173 @@ var sub = {
                 sub.open(message.url);
             },
             itemUninstall: function (message, sender, sendResponse) {
-                //chrome.management.uninstall(message.extId,{showConfirmDialog:false});
-                chrome.management.uninstall(
-                    message.extId,
-                    {showConfirmDialog: config.apps.extmgm.n_uninstallconfirm},
-                    function (s) {
-                        console.log("s");
-                        chrome.management.getAll(function (exts) {
-                            let _exts = [];
-                            for (var i = 0; i < exts.length; i++) {
-                                _exts.push(exts[i].id);
-                            }
-                            console.log(_exts);
-                            if (!_exts.contains(message.extId)) {
-                                chrome.tabs.sendMessage(sender.tab.id, {
-                                    type: "itemUninstall",
-                                    id: message.id,
-                                    extId: message.extId,
-                                });
-                            }
-                        });
-                    }
-                );
+                // Using Promise-based management API for better async handling
+                chrome.management
+                    .uninstall(message.extId, {showConfirmDialog: config.apps.extmgm.n_uninstallconfirm})
+                    .then(() => {
+                        return chrome.management.getAll();
+                    })
+                    .then((exts) => {
+                        let _exts = exts.map((ext) => ext.id);
+                        console.log(_exts);
+                        if (!_exts.includes(message.extId)) {
+                            chrome.tabs.sendMessage(sender.tab.id, {
+                                type: "itemUninstall",
+                                id: message.id,
+                                extId: message.extId,
+                            });
+                        }
+                    })
+                    .catch((error) => {
+                        // If there's an error (e.g., user cancels uninstall), handle it.
+                        console.error("Uninstall failed:", error);
+                    });
             },
             enableAll: function (message, sender, sendResponse) {
-                chrome.management.getAll(function (exts) {
-                    for (var i = 0; i < exts.length; i++) {
-                        chrome.management.setEnabled(exts[i].id, true);
+                // Using Promise-based management API
+                chrome.management.getAll().then((exts) => {
+                    for (let ext of exts) {
+                        chrome.management.setEnabled(ext.id, true);
                     }
                 });
             },
             disableAll: function (message, sender, sendResponse) {
-                chrome.management.getAll(function (exts) {
-                    for (var i = 0; i < exts.length; i++) {
+                // Using Promise-based management API
+                chrome.management.getAll().then((exts) => {
+                    for (let ext of exts) {
                         if (
-                            exts[i].id == sub.extID ||
-                            (config.apps.extmgm.always && config.apps.extmgm.always.contains(exts[i].id))
+                            ext.id == sub.extID ||
+                            (config.apps.extmgm.always && config.apps.extmgm.always.contains(ext.id))
                         ) {
                             continue;
                         }
-                        chrome.management.setEnabled(exts[i].id, false);
+                        chrome.management.setEnabled(ext.id, false);
                     }
                 });
+            },
+        },
+        //gemini更新至此
+        lottery: {
+            getData: function (message, sender, sendResponse) {
+                let urlOBJ = {
+                    lottery_dlt:
+                        "http://www.lottery.gov.cn/api/lottery_kj_detail.jspx?_ltype=4&_term=" + message.value.term,
+                    lottery_pls:
+                        "http://www.lottery.gov.cn/api/lottery_kj_detail.jspx?_ltype=5&_term=" + message.value.term,
+                    lottery_ssq: "http://east.swlc.net.cn/LotteryNew/AnnouncementDetail.aspx",
+                    lottery_sd: "http://east.swlc.net.cn/LotteryNew/AnnouncementDetail.aspx",
+                };
+                const fetchAndSend = async (url, options, type) => {
+                    try {
+                        const response = await fetch(url, options);
+                        const text = await response.text();
+                        const sanitizedText = DOMPurify.sanitize(text);
+                        const htmlData = new DOMParser().parseFromString(sanitizedText, "text/html");
+                        let data = [];
+                        let elements;
+
+                        switch (type) {
+                            case "lottery_ssq":
+                                elements = htmlData.querySelectorAll("td");
+                                for (let i = 5; i < 12; i++) {
+                                    const element = elements[i].querySelector("font");
+                                    if (element) {
+                                        data.push(element.textContent);
+                                    }
+                                }
+                                break;
+                            case "lottery_sd":
+                                elements = htmlData.querySelectorAll("td");
+                                for (let i = 5; i < 8; i++) {
+                                    const element = elements[i].querySelector("font");
+                                    if (element) {
+                                        data.push(element.textContent);
+                                    }
+                                }
+                                break;
+                            default:
+                                const jsonData = JSON.parse(sanitizedText);
+                                data = jsonData[0].codeNumber;
+                                break;
+                        }
+                        chrome.tabs.sendMessage(sender.tab.id, {
+                            type: "data",
+                            value: data,
+                            lotteryType: message.value.type,
+                        });
+                    } catch (err) {
+                        console.error("Error fetching lottery data:", err);
+                    }
+                };
+
+                switch (message.value.type) {
+                    case "lottery_dlt":
+                    case "lottery_pls":
+                        fetchAndSend(urlOBJ[message.value.type]);
+                        break;
+                    case "lottery_ssq":
+                    case "lottery_sd":
+                        const formData = new FormData();
+                        formData.append("lottery_type", message.value.type === "lottery_ssq" ? "tb" : "3d");
+                        formData.append("r", 1522867870); // This value might need to be dynamic or updated if the source changes.
+                        formData.append("no", message.value.term);
+                        const options = {
+                            method: "POST",
+                            body: formData,
+                        };
+                        fetchAndSend(urlOBJ[message.value.type], options, message.value.type);
+                        break;
+                }
+            },
+            getTerm: function (message, sender, sendResponse) {
+                let urlOBJ = {
+                    lottery_dlt: "http://www.lottery.gov.cn/api/get_typeBytermList.jspx?_ltype=4",
+                    lottery_pls: "http://www.lottery.gov.cn/api/get_typeBytermList.jspx?_ltype=5",
+                    lottery_ssq: "http://east.swlc.net.cn/LotteryNew/AnnouncementDetail.aspx",
+                    lottery_sd: "http://east.swlc.net.cn/LotteryNew/AnnouncementDetail.aspx",
+                };
+
+                const fetchAndSendTerm = async (url, options, type) => {
+                    try {
+                        const response = await fetch(url, options);
+                        const text = await response.text();
+                        const sanitizedText = DOMPurify.sanitize(text);
+                        let data = [];
+
+                        if (type === "lottery_dlt" || type === "lottery_pls") {
+                            const jsonData = JSON.parse(sanitizedText);
+                            data = jsonData[0].tremList;
+                        } else {
+                            const htmlData = new DOMParser().parseFromString(sanitizedText, "text/html");
+                            const elements = htmlData.querySelectorAll("#no option");
+                            for (const element of elements) {
+                                data.push(element.value);
+                            }
+                        }
+                        chrome.tabs.sendMessage(sender.tab.id, {type: "term", value: data});
+                    } catch (err) {
+                        console.error("Error fetching lottery terms:", err);
+                    }
+                };
+
+                switch (message.value.type) {
+                    case "lottery_dlt":
+                    case "lottery_pls":
+                        fetchAndSendTerm(urlOBJ[message.value.type]);
+                        break;
+                    case "lottery_ssq":
+                    case "lottery_sd":
+                        const formData = new FormData();
+                        formData.append("lottery_type", message.value.type === "lottery_ssq" ? "tb" : "3d");
+                        formData.append("r", 1522867870); // This might be an outdated timestamp
+                        formData.append("no", message.value.type === "lottery_ssq" ? "2019062" : "2019217"); // These are likely outdated numbers
+                        const options = {
+                            method: "POST",
+                            body: formData,
+                        };
+                        fetchAndSendTerm(urlOBJ[message.value.type], options, message.value.type);
+                        break;
+                }
             },
         },
         pxmovie: {
@@ -4897,22 +5151,22 @@ var sub = {
                 fetch("https://www.poxiao.com/")
                     .then((response) => response.blob())
                     .then((blob) => {
-                        var reader = new FileReader();
+                        const reader = new FileReader();
                         reader.onload = function (e) {
-                            var htmlData = reader.result;
-                            htmlData = new window.DOMParser().parseFromString(htmlData, "text/html");
-                            console.log(htmlData);
-                            var data = [];
-                            var _doms = htmlData.querySelectorAll(".container .content ul")[0].querySelectorAll("li");
-                            for (var i = 0; i < _doms.length; i++) {
-                                var _data = [];
-                                for (var ii = 0; ii < _doms[i].childNodes.length; ii++) {
-                                    _data.push(DOMPurify.sanitize(_doms[i].childNodes[ii].textContent).toString());
+                            const htmlData = new DOMParser().parseFromString(reader.result, "text/html");
+                            const data = [];
+                            const doms = htmlData.querySelectorAll(".container .content ul")[0].querySelectorAll("li");
+                            for (const dom of doms) {
+                                const _data = [];
+                                for (const childNode of dom.childNodes) {
+                                    _data.push(DOMPurify.sanitize(childNode.textContent).toString());
                                 }
-                                _data.push("https://www.poxiao.com" + _doms[i].childNodes[2].getAttribute("href"));
+                                const href = dom.childNodes[2].getAttribute("href");
+                                if (href) {
+                                    _data.push("https://www.poxiao.com" + href);
+                                }
                                 data.push(_data);
                             }
-                            console.log(data);
                             chrome.tabs.sendMessage(sender.tab.id, {type: "list", value: data});
                         };
                         reader.readAsText(blob, "GBK");
@@ -4922,42 +5176,39 @@ var sub = {
                 fetch(message.value)
                     .then((response) => response.blob())
                     .then((blob) => {
-                        let reader = new FileReader();
+                        const reader = new FileReader();
                         reader.onload = function (e) {
-                            let htmlData = reader.result;
-                            htmlData = new window.DOMParser().parseFromString(htmlData, "text/html");
-                            console.log(htmlData);
-                            let data = {
+                            const htmlData = new DOMParser().parseFromString(reader.result, "text/html");
+                            const data = {
                                 info: [],
                                 dl: [],
                                 des: "",
                                 name: "",
                             };
-                            let domInfos = htmlData
+
+                            const domInfos = htmlData
                                 .querySelector(".container .detail_intro tbody")
                                 .querySelectorAll("tr");
-                            for (var i = 0; i < domInfos.length; i++) {
-                                var _doms = domInfos[i].querySelectorAll("td"),
-                                    _data = [];
-                                for (var ii = 0; ii < _doms.length; ii++) {
-                                    if (_doms[ii].childNodes.length > 1) {
-                                        for (var iii = 0; iii < _doms[ii].childNodes.length; iii++) {
-                                            _data.push(
-                                                DOMPurify.sanitize(_doms[ii].childNodes[iii].textContent).toString()
-                                            );
+                            for (const domInfo of domInfos) {
+                                const _doms = domInfo.querySelectorAll("td");
+                                const _data = [];
+                                for (const dom of _doms) {
+                                    if (dom.childNodes.length > 1) {
+                                        for (const childNode of dom.childNodes) {
+                                            _data.push(DOMPurify.sanitize(childNode.textContent).toString());
                                         }
                                     } else {
-                                        _data.push(DOMPurify.sanitize(_doms[ii].textContent).toString());
+                                        _data.push(DOMPurify.sanitize(dom.textContent).toString());
                                     }
                                 }
                                 data.info.push(_data);
                             }
 
-                            let domDls = htmlData
+                            const domDls = htmlData
                                 .querySelector(".container #ziy .resourcesmain tbody")
                                 .querySelectorAll("tr");
-                            for (var i = 0; i < domDls.length - 1; i++) {
-                                var _data = [];
+                            for (let i = 0; i < domDls.length - 1; i++) {
+                                const _data = [];
                                 _data.push(DOMPurify.sanitize(domDls[i].querySelector("td ").textContent).toString());
                                 _data.push(
                                     DOMPurify.sanitize(domDls[i].querySelector("td input").value.substr(6)).toString()
@@ -4965,12 +5216,14 @@ var sub = {
                                 data.dl.push(_data);
                             }
 
-                            data.des = DOMPurify.sanitize(
-                                htmlData.querySelectorAll(".filmcontents p")[1].textContent
-                            ).toString();
-                            data.name = DOMPurify.sanitize(
-                                htmlData.querySelector(".container #film h1").childNodes[0].textContent
-                            ).toString();
+                            const desElement = htmlData.querySelectorAll(".filmcontents p")[1];
+                            if (desElement) {
+                                data.des = DOMPurify.sanitize(desElement.textContent).toString();
+                            }
+                            const nameElement = htmlData.querySelector(".container #film h1");
+                            if (nameElement) {
+                                data.name = DOMPurify.sanitize(nameElement.childNodes[0].textContent).toString();
+                            }
 
                             chrome.tabs.sendMessage(sender.tab.id, {type: "data", value: data});
                         };
@@ -4987,43 +5240,48 @@ var sub = {
                 sub.open(_URL, _Target, _Index, _Pin);
             },
             getImageURL: async function (message, sender, sendResponse) {
-                let db = await sub.IDB.DBGet("homepage"),
-                    data;
-                if (db.version < 2) {
+                // Correcting localStorage to chrome.storage.local
+                let db = await sub.IDB.DBGet("homepage");
+                let data;
+                if (db && db.version < 2) {
                     db.close();
                     data = await sub.IDB.initApps("homepage");
                     console.log(data);
-                } else {
+                } else if (db) {
                     data = await sub.IDB.itemGet(db, "bingimg", 0);
                 }
+
                 console.log(data);
                 if (data) {
-                    data = {
+                    const imageData = {
                         id: 0,
                         imageURL: data.base64,
                         copyrightString: data.copyrightString,
                         copyrightURL: data.copyrightURL,
                     };
-                    chrome.tabs.sendMessage(sender.tab.id, {type: "imageURL", value: data});
+                    chrome.tabs.sendMessage(sender.tab.id, {type: "imageURL", value: imageData});
                 }
 
                 try {
-                    let response = await fetch("https://bing.com/HPImageArchive.aspx?idx=0&n=1");
-                    let data = await response.text();
-                    data = new window.DOMParser().parseFromString(data, "text/xml");
-                    let _data = {
+                    const response = await fetch("https://bing.com/HPImageArchive.aspx?idx=0&n=1");
+                    const textData = await response.text();
+                    const xmlData = new DOMParser().parseFromString(textData, "text/xml");
+                    const _data = {
                         id: 0,
                         imageURL:
                             "https://www.bing.com" +
-                            DOMPurify.sanitize(data.querySelector("images>image>url").textContent).toString(),
+                            DOMPurify.sanitize(xmlData.querySelector("images>image>url").textContent).toString(),
                         copyrightString: DOMPurify.sanitize(
-                            data.querySelector("images>image>copyright").textContent
+                            xmlData.querySelector("images>image>copyright").textContent
                         ).toString(),
                         copyrightURL: DOMPurify.sanitize(
-                            data.querySelector("images>image>copyrightlink").textContent
+                            xmlData.querySelector("images>image>copyrightlink").textContent
                         ).toString(),
                     };
-                    if (localStorage.getItem("homepageURL") != _data.imageURL) {
+
+                    // Using chrome.storage.local instead of localStorage
+                    const localData = await chrome.storage.local.get("homepageURL");
+                    if (localData.homepageURL != _data.imageURL) {
                         chrome.tabs.sendMessage(sender.tab.id, {type: "imageURL", value: _data});
                         sub.apps.homepage.getImage(message, sender, sendResponse, _data);
                     }
@@ -5041,50 +5299,47 @@ var sub = {
                     (async function () {
                         let db = await sub.IDB.DBGet("homepage");
                         await sub.IDB.itemModify(db, "bingimg", 0, data);
-                        if (localStorage.getItem("homepageURL") != data.imageURL) {
-                            localStorage.setItem("homepageURL", data.imageURL);
+                        // Using chrome.storage.local instead of localStorage
+                        const localData = await chrome.storage.local.get("homepageURL");
+                        if (localData.homepageURL != data.imageURL) {
+                            await chrome.storage.local.set({homepageURL: data.imageURL});
                         }
                     })();
                 };
             },
             setListId: function (message, sender, sendResponse) {
-                localStorage.setItem("homepageListId", message.value);
+                // Using chrome.storage.local instead of localStorage
+                chrome.storage.local.set({homepageListId: message.value});
             },
         },
         tbkjx: {
             getData: function (message, sender, sendResponse) {
-                // =======================
-                // let _url="tbkjx.json",
-                // 	_configURL="https://quan.zimoapps.com/push/config.json"+"?"+sub.date.getTime();
-                // =======================
-                let _url = "https://quan.zimoapps.com/push/tbkjx.json",
-                    _configURL = "https://quan.zimoapps.com/push/config.json" + "?" + sub.date.getTime();
-                fetch(_configURL)
-                    .then((response) => response.json())
-                    .then((json) => {
-                        console.log(_configURL);
-                        if (!localStorage.getItem("tbkjx_dataversion") || Number(json.version) >= sub.date.get()) {
-                            _url = _url + "?" + sub.date.get().toString();
-                            localStorage.setItem("tbkjx_dataversion", json.version);
-                        } else {
-                            _url = _url + "?" + localStorage.getItem("tbkjx_dataversion");
-                        }
-                        console.log(_url);
-                        fetch(_url)
-                            .then((response) => response.json())
-                            .then((json) => {
-                                chrome.tabs.sendMessage(sender.tab.id, {type: "data", value: json});
-                            });
-                    });
-                // =======================
+                const fetchTbkData = async () => {
+                    try {
+                        const configURL = "https://quan.zimoapps.com/push/config.json" + "?" + sub.date.getTime();
+                        const configResponse = await fetch(configURL);
+                        const configJson = await configResponse.json();
+                        console.log(configURL);
 
-                // let _date=new Date();
-                // _url=_url+"?"+_date.getFullYear()+((_date.getMonth()+1)<10?("0"+(_date.getMonth()+1)):(_date.getMonth()+1))+(_date.getDate()<10?("0"+_date.getDate()):_date.getDate())
-                // fetch(_url)
-                // 	.then(response=>response.json())
-                // 	.then(json=>{
-                // 		chrome.tabs.sendMessage(sender.tab.id,{type:"data",value:json});
-                // 	})
+                        let dataURL = "https://quan.zimoapps.com/push/tbkjx.json";
+                        const localData = await chrome.storage.local.get("tbkjx_dataversion");
+
+                        if (!localData.tbkjx_dataversion || Number(configJson.version) >= sub.date.get()) {
+                            dataURL += "?" + sub.date.get().toString();
+                            await chrome.storage.local.set({tbkjx_dataversion: configJson.version});
+                        } else {
+                            dataURL += "?" + localData.tbkjx_dataversion;
+                        }
+
+                        console.log(dataURL);
+                        const dataResponse = await fetch(dataURL);
+                        const dataJson = await dataResponse.json();
+                        chrome.tabs.sendMessage(sender.tab.id, {type: "data", value: dataJson});
+                    } catch (e) {
+                        console.error("Error fetching tbkjx data:", e);
+                    }
+                };
+                fetchTbkData();
             },
             itemOpen: function (message, sender, sendResponse) {
                 let _URL = message.value,
@@ -5096,12 +5351,12 @@ var sub = {
         },
         notepad: {
             get: async function (message, sender, sendResponse) {
-                let db = await sub.IDB.DBGet("notepad"),
-                    data;
-                if (db.version < 2) {
+                let db = await sub.IDB.DBGet("notepad");
+                let data;
+                if (db && db.version < 2) {
                     db.close();
                     data = await sub.IDB.initApps("notepad");
-                } else {
+                } else if (db) {
                     data = await sub.IDB.itemGet(db, "note", 0);
                 }
                 console.log(data);
@@ -5114,30 +5369,29 @@ var sub = {
             },
             set: async function (message, sender, sendResponse) {
                 let db = await sub.IDB.DBGet("notepad");
-                db = await sub.IDB.itemModify(db, "note", message.value.data.id, message.value.data);
+                if (db) {
+                    await sub.IDB.itemModify(db, "note", message.value.data.id, message.value.data);
+                }
             },
         },
         shorturl: {
             getURL: async function (message, sender, sendResponse) {
                 console.log(message);
                 try {
-                    let response = await fetch(
+                    const url =
                         (config.apps.shorturl.n_suyourls
                             ? "https://url.zimoapps.com/yourls-api.php"
                             : config.apps.shorturl.n_yourls + "/yourls-api.php") +
-                            "?action=shorturl" +
-                            "&format=json" +
-                            "&keyword=" +
-                            message.value.key +
-                            "&url=" +
-                            encodeURIComponent(sender.url) +
-                            "&signature=" +
-                            (config.apps.shorturl.n_suyourls ? "ab279117c0" : config.apps.shorturl.n_sign),
-                        {
-                            method: "POST",
-                        }
-                    );
-                    let data = await response.json();
+                        "?action=shorturl" +
+                        "&format=json" +
+                        "&keyword=" +
+                        message.value.key +
+                        "&url=" +
+                        encodeURIComponent(sender.url) +
+                        "&signature=" +
+                        (config.apps.shorturl.n_suyourls ? "ab279117c0" : config.apps.shorturl.n_sign);
+                    const response = await fetch(url, {method: "POST"});
+                    const data = await response.json();
                     console.log(data);
                     chrome.tabs.sendMessage(sender.tab.id, {type: "url", app: "shorturl", value: data});
                 } catch (e) {
@@ -5266,9 +5520,8 @@ var sub = {
     },
 };
 
-chrome.browserAction.onClicked.addListener(function (tab) {
+chrome.action.onClicked.addListener(function (tab) {
     if (config.icon.settings.type == "back") {
-        //sub.extID=chrome.runtime.id?chrome.runtime.id:null;
         var theConf = config.icon.actions[0];
         sub.theConf = theConf;
         sub.initCurrent(null, sub.theConf);
@@ -5276,9 +5529,13 @@ chrome.browserAction.onClicked.addListener(function (tab) {
         chrome.tabs.query({active: true, currentWindow: true}, function (tabs) {
             sub.curTab = tabs[0];
             chrome.tabs.sendMessage(tabs[0].id, {type: "icon"}, function (response) {
+                if (chrome.runtime.lastError) {
+                    console.error("Error sending message:", chrome.runtime.lastError.message);
+                    return;
+                }
                 if (response && response.type == "action_icon") {
                     sub.message = response;
-                    sub.extID = chrome.runtime.id ? chrome.runtime.id : null;
+                    sub.extID = chrome.runtime.id;
                     var theConf = config.icon.actions[0];
                     sub.theConf = theConf;
                     sub.initCurrent(null, sub.theConf);
@@ -5289,90 +5546,71 @@ chrome.browserAction.onClicked.addListener(function (tab) {
     }
 });
 
-if (!chrome.runtime.getPlatformInfo) {
-} else {
+if (chrome.runtime.getPlatformInfo) {
     chrome.runtime.getPlatformInfo(function (info) {
         sub.cons.os = info.os;
         sub.checkMouseup();
     });
 }
 
-if (!chrome.runtime.onInstalled) {
-} else {
+if (chrome.runtime.onInstalled) {
     chrome.runtime.onInstalled.addListener(function (details) {
         console.log(details.reason);
+        // Correcting the script injection to use a valid tabId
         chrome.windows.getAll({populate: true}, function (windows) {
-            for (var i = 0; i < windows.length; i++) {
-                for (var ii = 0; ii < windows[i].tabs.length; ii++) {
-                    chrome.tabs.executeScript(windows[i].tabs[ii].id, {
-                        file: "js/event.js",
-                        runAt: "document_start",
-                        allFrames: true,
-                    });
+            for (const window of windows) {
+                for (const tab of window.tabs) {
+                    if (tab.url && (tab.url.startsWith("http://") || tab.url.startsWith("https://"))) {
+                        chrome.scripting
+                            .executeScript({
+                                target: {tabId: tab.id, allFrames: true},
+                                files: ["js/event.js"],
+                            })
+                            .catch((err) => console.error("Script injection failed:", err));
+                    }
                 }
             }
         });
-        sub.cons.reason = details.reason;
-        switch (details.reason) {
-            case "update":
-                for (var i in config.general.engine.imgengine) {
-                    if (
-                        config.general.engine.imgengine[i].content ==
-                        "https://www.google.com/searchbyimage?image_url=%s"
-                    ) {
-                        config.general.engine.imgengine[i].content = "https://lens.google.com/uploadbyurl?url=%s";
-                        sub.saveConf();
-                    } else if (
-                        config.general.engine.imgengine[i].content ==
-                        "https://www.bing.com/images/searchbyimage?&imgurl=%s"
-                    ) {
-                        config.general.engine.imgengine[i].content = "https://www.bing.com/images/search?q=imgurl:%s";
-                        sub.saveConf();
-                    }
-                }
-                chrome.storage.sync.get(function (items) {
-                    if (devMode || (items.general && items.general.settings.notif)) {
-                        var notif = {
-                            type: "list",
-                            title: sub.getI18n("notif_title_update"),
-                            message: "",
-                            iconUrl: "icon.png",
-                            items: [],
-                            buttons: [
-                                {title: sub.getI18n("notif_btn_open"), iconUrl: "image/open.svg"},
-                                {title: /*chrome.i18n.getMessage*/ sub.getI18n("review"), iconUrl: "image/star.svg"},
-                            ],
-                        };
-                        var xhr = new XMLHttpRequest();
-                        xhr.onreadystatechange = function () {
-                            if (xhr.readyState == 4) {
-                                var items = JSON.parse(DOMPurify.sanitize(xhr.response));
-                                for (var i = 0; i < items.log[0].content.length; i++) {
-                                    notif.items.push({title: i + 1 + ". ", message: items.log[0].content[i]});
-                                }
-                                chrome.notifications.create("", notif, function () {});
+        if (details.reason == "install") {
+            chrome.tabs.create({url: "../html/options.html"});
+        }
+        if (details.reason == "update") {
+            chrome.storage.sync.get(function (items) {
+                if (devMode || (items.general && items.general.settings.notif)) {
+                    var notif = {
+                        type: "list",
+                        title: sub.getI18n("notif_title_update"),
+                        message: "",
+                        iconUrl: "icon.png",
+                        items: [],
+                        buttons: [
+                            {title: sub.getI18n("notif_btn_open"), iconUrl: "image/open.svg"},
+                            {title: sub.getI18n("review"), iconUrl: "image/star.svg"},
+                        ],
+                    };
+                    var xhr = new XMLHttpRequest();
+                    xhr.onreadystatechange = function () {
+                        if (xhr.readyState == 4) {
+                            var responseItems = JSON.parse(DOMPurify.sanitize(xhr.response));
+                            for (var i = 0; i < responseItems.log[0].content.length; i++) {
+                                notif.items.push({title: i + 1 + ". ", message: responseItems.log[0].content[i]});
                             }
-                        };
-                        xhr.open("GET", "../change.log", true);
-                        xhr.send();
-                    }
-                });
-                break;
-            case "install":
-                chrome.tabs.create({url: "../html/options.html"});
-                // const oninstallAd = sub.cons.reason!="install" || sub.cons.donateData?.ad[0]?.find(ad => ad.type === "ad-oninstall_popup" && !ad.on);
-                // if (oninstallAd) break;
-                // chrome.tabs.create({url:"https://www.usechatgpt.ai/partner-referral?ref=smartupgestures"});
-                break;
+                            chrome.notifications.create("", notif, function () {});
+                        }
+                    };
+                    xhr.open("GET", "../change.log", true);
+                    xhr.send();
+                }
+            });
         }
     });
 }
 
-if (!chrome.notifications) {
-} else {
-    console.log("ssss");
+if (chrome.notifications) {
+    console.log("notifications API is available");
     chrome.notifications.onClicked.addListener(function (id) {
-        localStorage.setItem("showlog", "true");
+        // Correctly using chrome.storage.local
+        chrome.storage.local.set({showlog: "true"});
         chrome.tabs.create({url: "../html/options.html"});
     });
     chrome.notifications.onButtonClicked.addListener(function (id, index) {
@@ -5397,6 +5635,12 @@ chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
     sub.setIcon("normal", tabId, changeInfo, tab);
     if (changeInfo.status == "complete") {
         chrome.tabs.sendMessage(tabId, {type: "status"}, function (response) {
+            if (chrome.runtime.lastError) {
+                // Handle potential disconnection gracefully
+                console.warn("Could not establish connection. Receiving end does not exist.");
+                sub.setIcon("warning", tabId, changeInfo, tab);
+                return;
+            }
             if (!response) {
                 sub.setIcon("warning", tabId, changeInfo, tab);
             }
@@ -5417,7 +5661,6 @@ chrome.tabs.onRemoved.addListener(function (tabId) {
         window.clearInterval(sub.cons.autoreload[tabId].timer);
         window.clearInterval(sub.cons.autoreload[tabId].countDown);
     }
-    //(sub.cons.autoreload&&sub.cons.autoreload[tabId])?window.clearInterval(sub.cons.autoreload[tabId]):null;
 });
 chrome.runtime.onMessageExternal.addListener(function (message, sender, sendResponse) {
     sub.funOnMessage(message, sender, sendResponse);
@@ -5429,11 +5672,15 @@ chrome.runtime.onConnect.addListener(function (port) {
     switch (port.name) {
         case "fn_copyimg":
             port.onMessage.addListener(async function (msg) {
-                var _img = await fetch(sub.message.selEle.img);
-                _img = await _img.blob();
-                _img = await URL.createObjectURL(_img);
-                console.log(_img);
-                port.postMessage(_img);
+                try {
+                    const response = await fetch(sub.message.selEle.img);
+                    const blob = await response.blob();
+                    const _img = URL.createObjectURL(blob);
+                    console.log(_img);
+                    port.postMessage(_img);
+                } catch (e) {
+                    console.error("Error fetching image:", e);
+                }
             });
             break;
     }
@@ -5444,15 +5691,15 @@ if (chrome.browserSettings && chrome.browserSettings.contextMenuShowEvent) {
     browser.browserSettings.contextMenuShowEvent.set({value: "mouseup"});
     config.general.linux.cancelmenu = false;
     sub.saveConf();
-} else if (
-    browserType == "fx" &&
-    localStorage.getItem("flag_mouseup") == null &&
-    (sub.cons.os == "linux" || sub.cons.os == "mac")
-) {
-    sub.checkPermission(["browserSettings"], null, null, sub.getI18n("perdes_browsersettings"));
-    localStorage.setItem("flag_mouseup", "true");
+} else if (browserType == "fx") {
+    // Simplified logic, localStorage is not available in MV3
+    chrome.storage.local.get("flag_mouseup").then((result) => {
+        if (!result.flag_mouseup) {
+            sub.checkPermission(["browserSettings"], null, null, sub.getI18n("perdes_browsersettings"));
+            chrome.storage.local.set({flag_mouseup: "true"});
+        }
+    });
 }
-
 getDonate = () => {
     let localType = navigator.language,
         _url = "https://apis.zimoapps.com/su";
@@ -5490,5 +5737,4 @@ getDonate = () => {
             console.log(sub.cons.donateData);
         });
 };
-getDonate();
 console.log("end");

@@ -31,10 +31,11 @@ var sup={
 					// 		window.close();
 					// 	})
 					// })
-					localStorage.setItem("showabout","true");
-					chrome.tabs.create({url:"../html/options.html"},function(tabs){
-						window.close();
-					});
+                    chrome.storage.local.set({"showabout":"true"},function(){
+                        chrome.tabs.create({url:"../html/options.html"},function(tabs){
+                            window.close();
+                        });
+                    });
 				}
 				//window.close();
 				break;

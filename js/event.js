@@ -876,7 +876,7 @@ var sue = {
         var ui_dir = uidom.querySelector("div[data-suui=dir]");
         if (ui_dir) {
             var _img = document.createElement("img");
-            _img.src = chrome.extension.getURL("") + "image/" + "direct.png";
+            _img.src = chrome.runtime.getURL("") + "image/" + "direct.png";
             _img.style.cssText +=
                 "float:left;" +
                 "height:" +
@@ -944,7 +944,7 @@ var sue = {
                 for (var i = 0; i < sue._dirArray.length; i++) {
                     var _dir = sue.domCreate(
                         "img",
-                        {setName: ["src"], setValue: [chrome.extension.getURL("") + "image/direct.png"]},
+                        {setName: ["src"], setValue: [chrome.runtime.getURL("") + "image/direct.png"]},
                         null,
                         "vertical-align: text-top;transform:rotate(+" +
                             sue.directimg(sue._dirArray[i]) +
@@ -1032,7 +1032,7 @@ var sue = {
                 for (var ii = 0; ii < confOBJ.allaction[i].direct.length; ii++) {
                     var _img = sue.domCreate(
                         "img",
-                        {setName: ["src"], setValue: [chrome.extension.getURL("") + "image/direct.png"]},
+                        {setName: ["src"], setValue: [chrome.runtime.getURL("") + "image/direct.png"]},
                         null,
                         "vertical-align: text-top;height:" +
                             config[sue.drawType[0]].ui.allaction.width +
@@ -1056,7 +1056,7 @@ var sue = {
     },
     domDir2: function (img) {
         var domimg = document.createElement("img");
-        domimg.src = chrome.extension.getURL("") + "image/" + "direct.png";
+        domimg.src = chrome.runtime.getURL("") + "image/" + "direct.png";
         domimg.style.cssText +=
             "float:left;" +
             "height:" +
@@ -1074,7 +1074,7 @@ var sue = {
             for (var i = 0; i < sue._dirArray.length; i++) {
                 domdir +=
                     "<img src='" +
-                    chrome.extension.getURL("") +
+                    chrome.runtime.getURL("") +
                     "image/" +
                     "direct.png" +
                     "' style='/*float:left;display:block;margin-top:5px;*/" +
@@ -1195,66 +1195,6 @@ var sue = {
                         sue.uiPos(e);
                         break;
                     case "action":
-                        /*function blob2canvas(blob){
-						console.log(blob)
-					    var img = new Image;
-					    var c = document.createElement("canvas");
-					    var ctx = c.getContext('2d');
-					    img.src = URL.createObjectURL(blob);
-					    console.log(img)
-					    img.onload = function () {
-					        ctx.drawImage(img,0,0);
-					    }
-						return new Promise(resolve => {
-							img.onload = function () {
-							  c.width = this.naturalWidth;
-							  c.height = this.naturalHeight;
-							  ctx.drawImage(this, 0, 0);
-							  c.toBlob((blob) => {
-							    // here the image is a blob
-							    resolve(blob)
-							  }, "image/png", 0.75);
-							};
-						})
-					}
-
-
-					var port = chrome.runtime.connect({name: "copyimg"});
-					port.postMessage({type:"copyimg",url:"https://scpic.chinaz.net/files/pic/pic9/202201/apic37788.jpg"});
-					port.onMessage.addListener(function(msg) {
-						console.log(msg)
-						async function copyImage(imageURL){
-							var _img=await fetch(imageURL);
-								_img=await _img.blob(_img);
-							var _blob = await blob2canvas(_img);
-							const item = new ClipboardItem({ "image/png": _blob });
-							navigator.clipboard.write([item]);
-						}
-						function blob2canvas(blob){
-							console.log(blob)
-							var img = new Image;
-							var c = document.createElement("canvas");
-							var ctx = c.getContext('2d');
-							img.src = URL.createObjectURL(blob);
-							console.log(img)
-							img.onload = function () {
-								ctx.drawImage(img,0,0);
-							}
-							return new Promise(resolve => {
-								img.onload = function () {
-									c.width = this.naturalWidth;
-									c.height = this.naturalHeight;
-									ctx.drawImage(this, 0, 0);
-									c.toBlob((blob) => {
-										resolve(blob)
-									}, "image/png", 0.75);
-								};
-							})
-						}
-						copyImage(msg);
-
-					});*/
-
                         break;
                 }
             }

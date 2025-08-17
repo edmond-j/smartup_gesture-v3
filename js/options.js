@@ -1,3 +1,27 @@
+const storage = {
+    get: (key) => {
+        return new Promise((resolve) => {
+            chrome.storage.sync.get([key], (result) => {
+                resolve(result[key]);
+            });
+        });
+    },
+    set: (key, value) => {
+        return new Promise((resolve) => {
+            chrome.storage.sync.set({[key]: value}, () => {
+                resolve();
+            });
+        });
+    },
+    remove: (key) => {
+        return new Promise((resolve) => {
+            chrome.storage.sync.remove([key], () => {
+                resolve();
+            });
+        });
+    },
+};
+
 Array.prototype.contains = function (ele) {
     for (var i = 0; i < this.length; i++) {
         if (this[i] == ele) {
@@ -86,35 +110,6 @@ var suo = {
             suo.initExclusion();
             suo.initEnd();
         }, 100);
-        // suo.welcome();
-        // suo.adInline();
-    },
-    adInline: () => {
-        const inlineAd = suo.cons.donateData?.ad[0]?.find((ad) => ad.type === "ad-inline" && !ad.on);
-        inlineAd && document.querySelector("#ad-inline")?.remove();
-    },
-    welcome: () => {
-        const oninstallAd =
-            suo.cons.reason != "install" ||
-            suo.cons.donateData?.ad[0]?.find((ad) => ad.type === "ad-oninstall_popin" && !ad.on);
-        if (oninstallAd) return;
-
-        const dom = suo.initAPPbox(
-            [],
-            [800, 230],
-            "SmartUp has been installed successfully, and the following is an advertisement provided by the sponsor.",
-            "bg",
-            "showlist"
-        );
-        const domMain = dom.querySelector(".box_main");
-        domMain.innerText = "";
-
-        const domAd = suo.domCreate2("iframe", {
-            setName: ["src", "width", "height", "iframeborder"],
-            setValue: ["https://www.usechatgpt.ai", window.innerWidth * 0.8, window.innerHeight * 0.8, "none"],
-        });
-        domMain.appendChild(domAd);
-        suo.initPos(dom);
     },
     initNewAdded: () => {
         console.log("initNewAdded");
@@ -263,11 +258,16 @@ var suo = {
                         if (reset == "ReSeT") {
                             config = {};
                             config = defaultConf;
-                            chrome.storage.local.clear();
-                            suo.saveConf2();
-                            window.setTimeout(function () {
-                                window.location.reload();
-                            }, 1000);
+                            // 将 chrome.storage.local.clear() 替换为 storage.remove()
+                            chrome.storage.local.get(null, function (items) {
+                                let keys = Object.keys(items);
+                                storage.remove(keys).then(() => {
+                                    suo.saveConf2();
+                                    window.setTimeout(function () {
+                                        window.location.reload();
+                                    }, 1000);
+                                });
+                            });
                         } else {
                             suo.showMsgBox(suo.getI18n("msg_reset2"), "warning");
                         }
@@ -288,13 +288,9 @@ var suo = {
                             window.location.reload();
                         }, 500);
                         break;
-                    case "btn_closead":
-                        var domAd = e.target.parentNode.parentNode;
-                        domAd.parentNode.removeChild(domAd);
-                        break;
                 }
                 if (ele.classList.contains("box_btnkeyrst")) {
-                    e.target.parentNode.querySelector(".box_keyvalue").value = "";
+                    ele.parentNode.querySelector(".box_keyvalue").value = "";
                 }
                 if (ele.classList.contains("box_tabtitle") && !ele.classList.contains("box_tabtitleactive")) {
                     suo.tabSwitch(e);
@@ -320,9 +316,6 @@ var suo = {
                 }
                 if (ele.classList.contains("menuplus_opennew")) {
                     chrome.tabs.create({url: "../html/options.html"});
-                }
-                if (ele.classList.contains("nav_menu")) {
-                    document.querySelector(".menupluscontent").style.display = "block";
                 }
                 if (ele.classList.contains("box_diredit")) {
                     suo.directEdit(e);
@@ -462,9 +455,10 @@ var suo = {
                 if (e.target.dataset.confele == "autosync") {
                     console.log(e.target.checked);
                     config.general.sync.autosync = e.target.checked;
-                    chrome.storage.local.get(function (items) {
-                        let _obj = {};
-                        _obj.localConfig = items.localConfig;
+                    // 将 chrome.storage.local.get 替换为 storage.get
+                    storage.get("localConfig").then((items) => {
+                        let _obj = {localConfig: items};
+                        // 将 chrome.storage.local.clear 替换为 storage.remove，然后使用 storage.set
                         chrome.storage.local.clear(function () {
                             chrome.storage.local.set(_obj, function () {
                                 if (chrome.storage.sync) {
@@ -843,7 +837,7 @@ var suo = {
                     "img",
                     {
                         setName: ["className", "src"],
-                        setValue: ["item_edit", chrome.extension.getURL("") + "image/" + "direct.png"],
+                        setValue: ["item_edit", chrome.runtime.getURL("") + "image/" + "direct.png"],
                     },
                     null,
                     "height:24px;" + suo.directimg(confOBJ[i].direct[j])
@@ -858,10 +852,11 @@ var suo = {
         suo.initPos(_dom);
     },
     initPop: function () {
+        // Manifest V3: chrome.browserAction is now chrome.action
         if (config.general.fnswitch.fnicon) {
-            chrome.browserAction.setPopup({popup: ""});
+            chrome.action.setPopup({popup: ""});
         } else {
-            chrome.browserAction.setPopup({popup: "../html/popup.html"});
+            chrome.action.setPopup({popup: "../html/popup.html"});
         }
     },
     initI18n: function () {
@@ -885,11 +880,11 @@ var suo = {
                 i18nOBJ[i].innerText = trans;
             }
             /*if(i18nOBJ[i].title=="_i18n"){
-				i18nOBJ[i].title=trans;
-				if(i18nOBJ[i].tagName.toLowerCase()=="input"){
-					i18nOBJ[i].value="+"
-				}
-			}*/
+            	i18nOBJ[i].title=trans;
+            	if(i18nOBJ[i].tagName.toLowerCase()=="input"){
+            		i18nOBJ[i].value="+"
+            	}
+            }*/
         }
     },
     getI18n: function (str) {
@@ -1586,7 +1581,7 @@ var suo = {
                     var domRange = suo.domCreate2(
                             "input",
                             {
-                                setName: ["className", "name", "type", "min", "max", "step", "value"],
+                                setName: ["className", "type", "min", "max", "step", "value"],
                                 setValue: [
                                     "change box_range",
                                     conf.type,
@@ -1849,8 +1844,8 @@ var suo = {
         console.log(conf);
 
         var dom = suo.domCreate2("div", {setName: ["className"], setValue: ["box_optionlist"]}, null, null, {
-                setName: ["confobj"],
-                setValue: [conf.type],
+                    setName: ["confobj"],
+                    setValue: [conf.type],
             }),
             labelRadio = suo.domCreate2(
                 "span",
@@ -1861,8 +1856,8 @@ var suo = {
                 suo.getI18n(conf.type)
             ),
             domOption = suo.domCreate2("div", {setName: ["className"], setValue: ["box_radio"]}, null, null, {
-                setName: ["confobj"],
-                setValue: [conf.type],
+                    setName: ["confobj"],
+                    setValue: [conf.type],
             });
         dom.appendChild(labelRadio);
         dom.appendChild(domOption);
@@ -2033,8 +2028,8 @@ var suo = {
         },
         set_10: function () {
             var domSet = suo.domCreate2("div", {setName: ["className"], setValue: ["set set-10"]}, "", "", {
-                setName: ["conf0", "conf1"],
-                setValue: ["general", "settings"],
+                    setName: ["conf0", "conf1"],
+                    setValue: ["general", "settings"],
             });
             var setname = suo.domCreate2(
                 "div",
@@ -2429,7 +2424,7 @@ var suo = {
                 var liimg = suo.domCreate2("span", {setName: ["className"], setValue: ["item_edit"]});
                 liimg.style.cssText +=
                     "background:url(" +
-                    chrome.extension.getURL("") +
+                    chrome.runtime.getURL("") +
                     "image/" +
                     "direct.png" +
                     ") #d0d9ff center no-repeat;color:#d0d9ff;display:inline-block;width:40px;height:40px;" +
@@ -2613,7 +2608,7 @@ var suo = {
                             ");" +
                             (confOBJ[i].note && confOBJ[i].note.value ? "height:16px;" : "")
                     );
-                    _domImg.src = "../image/direct.png";
+                    _domImg.src = chrome.runtime.getURL("../image/direct.png");
                     // _domImg.draggable="false";
                     lidir.appendChild(_domImg);
                 }
@@ -4167,7 +4162,7 @@ var suo = {
         var reader = new FileReader();
         let importedConfig = {};
         reader.readAsText(file);
-        reader.onload = function (e) {
+        reader.onload = async function (e) {
             var str = Base64.decode(e.target.result);
             console.log("sdf");
             try {
@@ -4178,7 +4173,7 @@ var suo = {
                         alert(suo.getI18n("msg_importver"));
                         return;
                     }
-                    localStorage.setItem("sync", importedConfig.general.sync.autosync.toString());
+                    await storage.set("sync", importedConfig.general.sync.autosync.toString());
                     config = {};
                     config = importedConfig;
                     suo.saveConf2();
@@ -4237,8 +4232,10 @@ var suo = {
         }
         //console.log("fn_initActionEle")
     },
-    initEnd: function () {
-        if (config.general.settings.autosave) {
+    initEnd: async function () {
+        // 由于 localStorage 在 Manifest V3 中不推荐使用，我们将其替换为 chrome.storage.sync。
+        const autosave = await storage.get("autosave");
+        if (autosave) {
             document.querySelector("#menuplus_save").style.display = "none";
             document.querySelector(".nav_btn_save").style.display = "none";
         } else {
@@ -4270,16 +4267,18 @@ var suo = {
         suo.setTheme();
         suo.initLog();
         //show log
-        if (localStorage.getItem("showlog") == "true") {
+        const showlog = await storage.get("showlog");
+        if (showlog == "true") {
             suo.clickMenuDiv(document.querySelector("div[data-confobj='about']"));
             suo.clickMenuLI(document.querySelector("li[data-id0='13'][data-id1='0']"));
-            localStorage.removeItem("showlog");
+            await storage.remove("showlog");
         }
         //show about
-        if (localStorage.getItem("showabout")) {
+        const showabout = await storage.get("showabout");
+        if (showabout) {
             suo.clickMenuDiv(document.querySelector("div[data-confobj='about']"));
             suo.clickMenuLI(document.querySelector("li[data-id0='13'][data-id1='0']"));
-            localStorage.removeItem("showabout");
+            await storage.remove("showabout");
         }
         //init webstore url
         if (browserType == "cr") {
@@ -4828,9 +4827,6 @@ var suo = {
             return false;
         }
 
-        for (var i = 0; i < confArray.length; i++) {
-            confOBJ = confOBJ[confArray[i]];
-        }
         for (var i = 0; i < confOBJ.length; i++) {
             if (confOBJ[i].direct == editDirect) {
                 suo.showMsgBox(suo.getI18n("msg_dirrepeat"), "error", "", 10000);
@@ -4850,12 +4846,43 @@ var suo = {
     },
     donateBox: {
         init: function () {
-            chrome.runtime.sendMessage({type: "getDonateData"}, function (response) {
-                console.log(response.value);
-                suo.cons.donateData = response.value;
-                suo.donateBox.show();
-                suo.donateBox.dom(response.value);
-            });
+            // chrome.runtime.sendMessage({type:"getDonateData"},function(response){
+            // 	let localType=navigator.language,
+            // 		_url="https://apis.zimoapps.com/su";
+            // 		// _url="http://127.0.0.1:3000/su";
+            // 	localType=localType.replace("-","_");
+            // 	fetch(_url,{
+            // 		method:"GET",
+            // 		cache:"no-cache"
+            // 	}).then(response=>response.json())
+            // 	.then(response=>{
+            // 		suo.cons.xhrDonate=response;
+            // 		suo.donateBox.show();
+            // 		let data={
+            // 			donate:[],
+            // 			ad:[]
+            // 		}
+            // 		if(response[0]&&response[0]["on"]&&response[0].donate[0][localType]){
+            // 			data.donate.push(response[0].donate[0][localType]);
+            // 		}else{
+            // 			if(response[0].donate[0]["default"]){
+            // 				data.donate.push(response[0].donate[0]["default"]);
+            // 			}else{
+            // 				data.donate.length=0;
+            // 			}
+            // 		}
+            // 		if(response[1]&&response[1]["on"]&&response[1].ad[0][localType]){
+            // 			data.ad.push(response[1].ad[0][localType]);
+            // 		}else{
+            // 			if(response[1].ad[0]["default"]){
+            // 				data.ad.push(response[1].ad[0]["default"]);
+            // 			}else{
+            // 				data.ad.length=0;
+            // 			}
+            // 		}
+            // 		suo.donateBox.dom(data);
+            // 	})
+            // })
         },
         dom: function (items) {
             let domMain = document.querySelector("#donate_main"),
@@ -4890,7 +4917,11 @@ var suo = {
                             _ccul.appendChild(
                                 suo.domCreate2(
                                     "li",
-                                    {setName: ["className"], setValue: ["donate_ccli"]},
+                                    {
+                                        setName: ["className"],
+                                        setValue: ["donate_ccli"],
+                                        eclass: ["donate_ccli-current"],
+                                    },
                                     null,
                                     null,
                                     {setName: ["id"], setValue: [i]},
@@ -5047,13 +5078,10 @@ var suo = {
     },
 };
 chrome.runtime.sendMessage({type: "opt_getconf"}, function (response) {
-    console.log(response);
     defaultConf = response.defaultConf;
     config = response.config;
     suo.cons.os = response.os;
     devMode = response.devMode;
-    suo.cons.donateData = response.donateData;
-    suo.cons.reason = response.reason;
     suo.begin();
 });
 chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
