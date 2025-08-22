@@ -31,12 +31,11 @@ var sup={
 					// 		window.close();
 					// 	})
 					// })
-                    chrome.storage.local.set({"showabout":"true"},function(){
-                        chrome.tabs.create({url:"../html/options.html"},function(tabs){
+                    chrome.storage.local.set({"showabout": true }, () => {
+                        chrome.tabs.create({url: chrome.runtime.getURL("html/options.html")});
                             window.close();
-                        });
                     });
-				}
+                }
 				//window.close();
 				break;
 			case"change":

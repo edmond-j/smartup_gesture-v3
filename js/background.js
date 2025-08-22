@@ -819,6 +819,7 @@ var getDefault = {
     },
 };
 defaultConf = getDefault.value();
+config = defaultConf;
 let loadLocalConfig = function () {
     chrome.storage.local.get(function (items) {
         localConfig = items.local;
@@ -4332,19 +4333,24 @@ var sub = {
         console.log(sendResponse);
         sub.message = message;
         let getConf = function () {
-            let drawType = message.drawType,
-                confType = config[drawType[0]][drawType[1]],
-                direct = message.direct,
-                theName = "",
-                theConf = "";
-            for (var i = 0; i < confType.length; i++) {
+            const drawType = Array.isArray(message.drawType) ? message.drawType : null;
+            const cfg = (typeof config === "object" && config) || defaultConf || getDefault.value();
+
+            // 任一维度缺失就直接返回空配置，后续逻辑会把它当“没有命中”
+            if (!drawType || !cfg?.[drawType[0]]?.[drawType[1]]) {
+                return { name: null };
+            }
+
+            const confType = cfg[drawType[0]][drawType[1]];
+            const direct = message.direct;
+            let theConf = "";
+            for (let i = 0; i < confType.length; i++) {
                 if (confType[i].direct == direct) {
-                    theName = confType[i].name;
-                    theConf = confType[i];
-                    break;
+                theConf = confType[i];
+                break;
                 }
-                if (i == confType.length - 1) {
-                    theConf = {name: null /*,mydes:null*/};
+                if (i === confType.length - 1) {
+                theConf = { name: null };
                 }
             }
             return theConf;
@@ -4580,7 +4586,8 @@ var sub = {
                 _sendConf.note = sub.theConf.note;
                 _sendConf.allaction = [];
                 //get all actions
-                let _confType = config[message.drawType[0]][message.drawType[1]];
+                const cfg = (typeof config === "object" && config) || defaultConf || getDefault.value();
+                let _confType = cfg?.[message.drawType[0]]?.[message.drawType[1]] ?? [];
                 if (config[sub.message.drawType[0]].ui.allaction.enable) {
                     for (let i = 0; i < _confType.length; i++) {
                         if (
